@@ -19,8 +19,8 @@ const BILL_TYPES=['quotation','cpo','vpo','invoice'];
 const PAY_TERMS=['100% upfront','50% advance, balance on delivery','30% advance, 40% on progress, 30% on completion','Net 30 days','Net 45 days','On completion'];
 
 function billLoad(){ try{ const r=localStorage.getItem(BILL_LS); if(r){ const d=JSON.parse(r); d.docs=d.docs||[]; return d; } }catch{} return billSeed(); }
-function billSave2(){ try{ localStorage.setItem(BILL_LS, JSON.stringify(BILL)); }catch{} }
-let BILL=billLoad();
+function billSave2(){ try{ localStorage.setItem(BILL_LS, JSON.stringify(BILL)); }catch{} syncPush(BILL_LS, BILL); }
+let BILL: BillingState = billLoad();
 function billNo(type){ const pfx=BILL_META[type].num; let m=0; BILL.docs.forEach(d=>{ if(d.type!==type) return; const g=((d.number||'').match(/(\d+)$/)||[])[1]; if(g&&+g>m)m=+g; }); return pfx+'-'+String(m+1).padStart(4,'0'); }
 
 /* ---------- parties & catalogue ---------- */
@@ -42,7 +42,7 @@ function openNewDoc(type){ bType=type; billDraft={ party:'', partyId:'', ref:'',
 
 /* ============================================================ router ============================================================ */
 function billingHTML(){ return bView==='new'? billForm() : billList(); }
-function billBind(){ if(bView==='new'){ renderBillLines(); return; } const s=document.getElementById('bcd-q'); if(s) s.oninput=()=>{ billListQ=s.value; bPage=1; const el=document.getElementById('app'); el.innerHTML=billList(); const n=document.getElementById('bcd-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); billBind(); } }; }
+function billBind(){ if(bView==='new'){ renderBillLines(); return; } const s=(document.getElementById('bcd-q') as HTMLInputElement); if(s) s.oninput=()=>{ billListQ=s.value; bPage=1; const el=document.getElementById('app'); el.innerHTML=billList(); const n=(document.getElementById('bcd-q') as HTMLInputElement); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); billBind(); } }; }
 
 /* ============================================================ list ============================================================ */
 function billTotals(d){ const ls=(d.lines||[]).filter(l=>l.use!==false); const sub=ls.reduce((s,l)=>s+(+l.qty||0)*(+l.rate||0),0); const tax=ls.reduce((s,l)=>s+(+l.qty||0)*(+l.rate||0)*(+l.tax||0)/100,0); return {sub,tax,total:sub+tax}; }
@@ -112,7 +112,7 @@ function billForm(){
   const partyOpts=`<option value="">Select…</option>`+parties.map(p=>`<option value="${esc(p)}" ${billDraft.party===p?'selected':''}>${esc(p)}</option>`).join('');
   const termSelect=`<select class="f" id="bl-terms" onchange="billDraft.terms=this.value;billRecalc()">${PAY_TERMS.map(t=>`<option ${billDraft.terms===t?'selected':''}>${esc(t)}</option>`).join('')}</select>`;
   const termText=`<input class="f" id="bl-terms" placeholder="e.g. 50% advance, balance on delivery" value="${esc(billDraft.terms||'')}" oninput="billDraft.terms=this.value;billRecalc()">`;
-  const fld=(lab,inner,hint,col2)=>`<div class="fld ${col2?'col2':''}"><label>${lab}</label>${inner}${hint?`<div class="bl-hint">${hint}</div>`:''}</div>`;
+  const fld=(lab,inner,hint?,col2?)=>`<div class="fld ${col2?'col2':''}"><label>${lab}</label>${inner}${hint?`<div class="bl-hint">${hint}</div>`:''}</div>`;
   const party=fld(m.party+' <span class="req">*</span>',`<select class="f" id="bl-party" onchange="billSetParty(this.value)">${partyOpts}</select>`);
   const partyid=fld(m.party+' ID',`<input class="f" id="bl-partyid" placeholder="Auto-filled on selecting ${m.party.toLowerCase()}" value="${esc(billDraft.partyId)}" readonly>`);
   const subject=fld('Subject',`<input class="f" id="bl-subject" placeholder="${bType==='vpo'?'e.g. Steel for MC 041':'e.g. Civil works — Phase 1'}" value="${esc(billDraft.subject)}" oninput="billDraft.subject=this.value">`);
@@ -160,7 +160,7 @@ function billForm(){
 }
 function billToggleAll(){ const allOn=billDraft.lines.length>0 && billDraft.lines.every(l=>l.use); billDraft.lines.forEach(l=>l.use=!allOn); renderBillLines(); }
 function billRefOpts(){ const q=BILL.docs.filter(d=>d.type==='quotation'); return `<option value="">All stages — none (direct invoice)</option>`+q.map(d=>`<option value="${d.id}" ${billDraft.ref===d.id?'selected':''}>${esc(d.number)} — ${esc(d.party)}</option>`).join(''); }
-function billSetParty(v){ billDraft.party=v; billDraft.partyId=billPartyId(bType,v); const e=document.getElementById('bl-partyid'); if(e) e.value=billDraft.partyId; billRecalc(); }
+function billSetParty(v){ billDraft.party=v; billDraft.partyId=billPartyId(bType,v); const e=(document.getElementById('bl-partyid') as HTMLInputElement); if(e) e.value=billDraft.partyId; billRecalc(); }
 function billAddCatalog(){ const v=val('bl-cat'); if(!v) return; let line; if(v.slice(0,2)==='m:'){ const it=item(v.slice(2)); line={desc:it.name,cat:it.category,qty:1,rate:it.rate||0,tax:18,use:true}; } else { const c=(jcr.costCodes||[]).find(x=>x.code===v.slice(2)); line={desc:(c?c.code+' — '+c.desc:v.slice(2)),cat:'Works',qty:1,rate:0,tax:18,use:true}; } billDraft.lines.push(line); renderBillLines(); }
 function billAddCustom(){ billDraft.lines.push({desc:'',cat:'',qty:1,rate:0,tax:18,use:true}); renderBillLines(); }
 function renderBillLines(){
@@ -241,7 +241,7 @@ function billPrint(id){
 function billSeed(){
   const cl=billClients(); const C=i=>cl[i%Math.max(1,cl.length)]||'Coastal Grove Estates LLP';
   const V=i=>(state.vendors[i%Math.max(1,state.vendors.length)]||{name:'JSW Steel'}).name;
-  const L=(desc,cat,qty,rate,tax)=>({desc,cat,qty,rate,tax:tax==null?18:tax,use:true});
+  const L=(desc,cat,qty,rate,tax?)=>({desc,cat,qty,rate,tax:tax==null?18:tax,use:true});
   const d=(type,n,party,proj,date,status,lines,subj)=>({ id:'DS'+type+n, type, number:BILL_META[type].num+'-'+String(n).padStart(4,'0'), party, partyId:billPartyId(type,party), subject:subj||'', poNumber:proj, date, dueDate:'', terms:type==='quotation'?'50% advance, balance on delivery':'Net 30 days', lines, status, createdAt:date+'T09:00:00Z', createdBy:'R. Suresh' });
   const docs=[
     d('quotation',2,'Green Valley Estates','','2026-10-29','Sent',[L('Civil works package','Works',1,0,18)],'Civil works — Green Valley'),

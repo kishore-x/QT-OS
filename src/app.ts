@@ -5,7 +5,7 @@
 'use strict';
 
 /* ---------- icons ---------- */
-function svg(p,w){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"${w?` style="width:${w}px;height:${w}px"`:''}>${p}</svg>`; }
+function svg(p,w?){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"${w?` style="width:${w}px;height:${w}px"`:''}>${p}</svg>`; }
 const IC = {
   dashboard:'<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
   projects:'<path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9v.01M9 12v.01M9 15v.01"/>',
@@ -36,10 +36,10 @@ const IC = {
 /* ---------- state ---------- */
 const LS='qualtech-inv-v3';
 const clone=o=>JSON.parse(JSON.stringify(o));
-function load(){ try{ const r=localStorage.getItem(LS); if(r) return JSON.parse(r); }catch{} return clone(SEED); }
-function save(){ try{ localStorage.setItem(LS, JSON.stringify(state)); }catch{} }
+function load(): InventoryState { try{ const r=localStorage.getItem(LS); if(r) return JSON.parse(r); }catch{} return clone(SEED); }
+function save(){ try{ localStorage.setItem(LS, JSON.stringify(state)); }catch{} syncPush(LS, state); }
 function resetData(){ state=clone(SEED); save(); }
-let state=load();
+let state: InventoryState = load();
 
 const item=c=>state.items.find(i=>i.code===c);
 const loc=id=>state.locations.find(l=>l.id===id);
@@ -64,7 +64,7 @@ const money=n=>'₹'+Math.round(n).toLocaleString('en-IN');
 const num=n=>Number(n).toLocaleString('en-IN');
 function nowDate(){ return new Date().toISOString().slice(0,10); }
 function nowTime(){ const d=new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
-function nextId(prefix,arrKey,field){ let max=0; (state[arrKey]||[]).forEach(x=>{ const m=((x[field||'id'])||'').match(/(\d+)\s*$/); if(m){ const n=+m[1]; if(n>max)max=n; } }); return prefix+(max+1); }
+function nextId(prefix,arrKey,field?){ let max=0; (state[arrKey]||[]).forEach(x=>{ const m=((x[field||'id'])||'').match(/(\d+)\s*$/); if(m){ const n=+m[1]; if(n>max)max=n; } }); return prefix+(max+1); }
 function addMovement(mv){ mv.id=mv.id||('MV-'+(1000+state.movements.length+1)); mv.date=mv.date||nowDate(); mv.time=mv.time||nowTime(); state.movements.push(mv); }
 function toast(msg){ const t=document.getElementById('toast'); t.innerHTML=svg(IC.check)+'<span>'+msg+'</span>'; t.classList.add('on'); clearTimeout(window._tt); window._tt=setTimeout(()=>t.classList.remove('on'),2600); }
 
@@ -238,7 +238,7 @@ function inventoryHTML(){
 }
 function selLoc(id){ curLoc=id; page=1; renderView(); }
 function selTab(t){ curTab=t; page=1; renderView(); }
-function invSearch(v){ qFilter=v; page=1; const f=document.getElementById('invSearch'); renderView(); const f2=document.getElementById('invSearch'); if(f2){ f2.focus(); f2.setSelectionRange(v.length,v.length);} }
+function invSearch(v){ qFilter=v; page=1; const f=document.getElementById('invSearch'); renderView(); const f2=(document.getElementById('invSearch') as HTMLInputElement); if(f2){ f2.focus(); f2.setSelectionRange(v.length,v.length);} }
 function pg(n){ page=n; renderView(); }
 function bindInv(){ /* re-focus handled in invSearch */ }
 
@@ -301,10 +301,10 @@ function openMore(e){
     <button class="del" onclick="reset()">${svg(IC.history)} Reset demo data</button>`;
   wrap.appendChild(m);
 }
-document.addEventListener('click',e=>{ if(!e.target.closest('.more-wrap')) document.querySelectorAll('.more-wrap .menu').forEach(x=>x.remove()); });
+document.addEventListener('click',e=>{ if(!(e.target as Element).closest('.more-wrap')) document.querySelectorAll('.more-wrap .menu').forEach(x=>x.remove()); });
 function exportCSV(){
   const head=['Code','Material','Category','Unit','On Hand','Reserved','Available','Value','Status','Location'];
-  const rows=[head];
+  const rows: CsvRow[]=[head];
   filteredItems().forEach(it=>{ const oh=onHand(it.code,curLoc); rows.push([it.code,it.name,it.category,it.unit,oh,reservedQty(it.code,curLoc),available(it.code,curLoc),oh*it.rate,statusOf(it,curLoc).t,loc(curLoc).name]); });
   const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
   const a=document.createElement('a'); a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv); a.download='inventory-'+curLoc+'.csv'; document.body.appendChild(a); a.click(); a.remove();
@@ -316,7 +316,7 @@ function pendingTransfersHTML(){
   if(!pend.length) return '';
   return `<div class="panel"><div class="rail-h"><h3>In Transit</h3></div>
     ${pend.map(m=>{const it=item(m.code);return `<div class="mv"><span class="md d-xfer"></span>
-      <div class="mb"><div class="t">${esc(it?it.name:m.code)} · ${num(m.qty)} ${it?it.unit:''}</div><div class="s">${locName(m.from2||m.fromLoc)} → ${locName(m.transferTo)}</div></div>
+      <div class="mb"><div class="t">${esc(it?it.name:m.code)} · ${num(m.qty)} ${it?it.unit:''}</div><div class="s">${locName(m.fromLoc)} → ${locName(m.transferTo)}</div></div>
       <button class="btn sm" onclick="receiveTransfer('${m.id}')">Receive</button></div>`;}).join('')}</div>`;
 }
 function receiveTransfer(id){
@@ -343,16 +343,16 @@ function rowMenu(e,code){
   wrap.appendChild(m);
 }
 function closeMenus(){ document.querySelectorAll('.menu').forEach(m=>m.remove()); }
-document.addEventListener('click',e=>{ if(!e.target.closest('.row-menu')) closeMenus(); });
+document.addEventListener('click',e=>{ if(!(e.target as Element).closest('.row-menu')) closeMenus(); });
 
 /* ---------- modal framework ---------- */
 function openModal(html){ const l=document.getElementById('layer'); l.innerHTML=`<div class="scrim" onclick="closeModal()"></div>${html}`; l.classList.add('on'); }
 function closeModal(){ const l=document.getElementById('layer'); l.classList.remove('on'); l.innerHTML=''; }
-function val(id){ const e=document.getElementById(id); return e?e.value.trim():''; }
+function val(id){ const e=(document.getElementById(id) as HTMLInputElement); return e?e.value.trim():''; }
 function numVal(id){ return Number(val(id))||0; }
 function itemOptions(sel,filterType){ return state.items.filter(i=>!filterType||i.type===filterType).map(i=>`<option value="${i.code}" ${i.code===sel?'selected':''}>${i.code} — ${esc(i.name)}</option>`).join(''); }
 function locOptions(sel){ return state.locations.map(l=>`<option value="${l.id}" ${l.id===sel?'selected':''}>${esc(l.name)}</option>`).join(''); }
-function siteOptions(sel){ return sites().map(l=>`<option value="${l.id}" ${l.id===sel?'selected':''}>${esc(l.name)}</option>`).join(''); }
+function siteOptions(sel?){ return sites().map(l=>`<option value="${l.id}" ${l.id===sel?'selected':''}>${esc(l.name)}</option>`).join(''); }
 function mh(icClass,icon,title,sub){ return `<div class="m-head"><div class="mh-ic ${icClass}" style="background:var(--blue-l);color:var(--blue)">${svg(icon)}</div><div><h3>${title}</h3><p>${sub}</p></div><button class="x" onclick="closeModal()">×</button></div>`; }
 
 /* ---------- Stock In ---------- */
@@ -553,12 +553,12 @@ function addPOLine(){
     <input id="pol-rate-${i}" type="number" min="0" placeholder="Rate" value="">
     <button class="xrow" onclick="this.parentNode.remove()">×</button>`;
   wrap.appendChild(d);
-  const sel=document.getElementById('pol-code-'+i); sel.onchange=()=>{ const it=item(sel.value); document.getElementById('pol-rate-'+i).value=it?it.rate:''; };
-  const it0=item(sel.value); document.getElementById('pol-rate-'+i).value=it0?it0.rate:'';
+  const sel=(document.getElementById('pol-code-'+i) as HTMLInputElement); sel.onchange=()=>{ const it=item(sel.value); (document.getElementById('pol-rate-'+i) as HTMLInputElement).value=it?String(it.rate):''; };
+  const it0=item(sel.value); (document.getElementById('pol-rate-'+i) as HTMLInputElement).value=it0?String(it0.rate):'';
 }
 function submitPO(){
   const lines=[];
-  document.querySelectorAll('#po-lines .po-line').forEach(row=>{ const i=row.id.split('-')[1]; const code=document.getElementById('pol-code-'+i).value; const qty=Number(document.getElementById('pol-qty-'+i).value)||0; const rate=Number(document.getElementById('pol-rate-'+i).value)||0; if(code&&qty>0) lines.push({code,qty,rate}); });
+  document.querySelectorAll('#po-lines .po-line').forEach(row=>{ const i=row.id.split('-')[1]; const code=(document.getElementById('pol-code-'+i) as HTMLInputElement).value; const qty=Number((document.getElementById('pol-qty-'+i) as HTMLInputElement).value)||0; const rate=Number((document.getElementById('pol-rate-'+i) as HTMLInputElement).value)||0; if(code&&qty>0) lines.push({code,qty,rate}); });
   if(!lines.length) return toast('Add at least one item line');
   const id=nextId('PO-2026-0','purchaseOrders');
   state.purchaseOrders.push({id,date:val('po-date'),vendorId:val('po-vendor'),status:val('po-status'),deliverTo:val('po-loc'),lines});
@@ -668,7 +668,7 @@ function dashboardHTML(){
   const SP_UP=[0.30,0.40,0.35,0.52,0.58,0.63,0.73,0.85];
   const SP_DN=[0.85,0.74,0.78,0.62,0.66,0.54,0.47,0.40];
 
-  const prog=p=>{ if(!p.start||!p.finish) return 0; const s=new Date(p.start),f=new Date(p.finish),n=new Date(nowDate()); if(f<=s) return 0; return Math.max(2,Math.min(100,Math.round((n-s)/(f-s)*100))); };
+  const prog=p=>{ if(!p.start||!p.finish) return 0; const s=new Date(p.start),f=new Date(p.finish),n=new Date(nowDate()); if(f<=s) return 0; return Math.max(2,Math.min(100,Math.round((n.getTime()-s.getTime())/(f.getTime()-s.getTime())*100))); };
   const stCls=s=>({'In Progress':'blue','On Track':'green','Completed':'green','Nearing Completion':'teal','Planning':'amber','Delayed':'red'}[s]||'grey');
   const docCls=s=>({Paid:'green',Accepted:'green',Received:'blue',Sent:'blue',Issued:'blue',Open:'grey',Closed:'grey',Draft:'grey',Pending:'amber',Overdue:'red'}[s]||'grey');
   const badge=(t,c)=>`<span class="ov-badge ${c}">${esc(t||'—')}</span>`;
@@ -783,12 +783,12 @@ const JC_LS='qualtech-jcr-v3';
 function jcExtraSeed(startN){
   const cc=(JCR_SEED.costCodes||[]); const code=i=>(cc[i]?cc[i].code:'3100');
   // shared item catalogue (base rate); each project scales rates a little so history has spread
-  const MAT=[
+  const MAT: [string, string, number, number, string][] = [
     ['OPC 53 Cement','bag',415,2, 'CEM'], ['TMT Bar 16mm','MT',68000,8,'RCC'], ['Ready Mix Concrete M30','Cum',6400,8,'RCC'],
     ['River Sand','Cum',2100,0,'EXC'], ['20mm Aggregate','Cum',1500,0,'EXC'], ['Clay Bricks','Nos',9,5,'BRK'],
     ['Shuttering Ply 12mm','Sqm',820,12,'RCC'], ['Vitrified Tiles 600x600','Sqm',640,20,'FIN'], ['Emulsion Paint','Ltr',285,20,'FIN'],
   ];
-  const LAB=[ ['Mason','day',1050,6], ['Helper','day',700,6], ['Bar bender','day',1150,8], ['Carpenter','day',1200,12], ['Painter','day',950,20] ];
+  const LAB: [string, string, number, number][] = [ ['Mason','day',1050,6], ['Helper','day',700,6], ['Bar bender','day',1150,8], ['Carpenter','day',1200,12], ['Painter','day',950,20] ];
   const defs=[
     {id:'MC041',name:'Lakeside Commercial Tower',jobCode:'MC 041',client:'Lakeside Developers',manager:'A. Krishnan',address:'OMR, Navalur, Chennai',builtUpArea:48000,originalCV:152000000,status:'In Progress',mul:1.06,month:'2026-07'},
     {id:'MC047',name:'Green Valley Villas',jobCode:'MC 047',client:'Green Valley Estates',manager:'S. Ramesh',address:'Sriperumbudur, Kanchipuram',builtUpArea:26500,originalCV:98500000,status:'In Progress',mul:0.95,month:'2026-08'},
@@ -812,7 +812,7 @@ function jcExtraSeed(startN){
   });
   return {projects,entries,boq,overheads,nextN:n};
 }
-function jcLoad(){
+function jcLoad(): JobCostState {
   try{ const r=localStorage.getItem(JC_LS); if(r){ const d=JSON.parse(r); d.boq=d.boq||[]; d.audit=d.audit||[]; if(!d.currentProjectId) d.currentProjectId=(d.projects[0]||{}).id; return d; } }catch{}
   const entries=[]; let n=1;
   const base={projectId:'MC034', archived:false, createdBy:'Import', createdAt:'2026-08-31'};
@@ -825,8 +825,8 @@ function jcLoad(){
   const ex=jcExtraSeed(n);
   return { projects:[Object.assign({},JC_PROJECT), ...ex.projects], currentProjectId:'MC034', costCodes:JCR_SEED.costCodes.map(c=>Object.assign({},c)), entries:[...entries, ...ex.entries], consumables, overheads:[...overheads, ...ex.overheads], boq:[...boq, ...ex.boq], audit:[], reporting:'2026-08' };
 }
-let jcr=jcLoad();
-function curProject(){ return (jcr.projects||[]).find(p=>p.id===jcr.currentProjectId) || (jcr.projects||[])[0] || {}; }
+let jcr: JobCostState = jcLoad();
+function curProject(): Project { return (jcr.projects||[]).find(p=>p.id===jcr.currentProjectId) || (jcr.projects||[])[0] || ({} as Project); }
 function fcForProject(cat){ return jcr.currentProjectId==='MC034' ? (JC_FCL[cat]||0) : 0; }
 function fcGrand(){ return jcr.currentProjectId==='MC034' ? JC_FCL.grand : 0; }
 const projOH=()=>(jcr.overheads||[]).filter(o=>o.projectId===jcr.currentProjectId);
@@ -834,7 +834,7 @@ const projBOQ=()=>(jcr.boq||[]).filter(b=>b.projectId===jcr.currentProjectId&&!b
 const projCons=()=>(jcr.consumables||[]).filter(c=>c.projectId===jcr.currentProjectId);
 const projEntries=()=>(jcr.entries||[]).filter(e=>e.projectId===jcr.currentProjectId&&!e.archived);
 function setCurProject(id){ jcr.currentProjectId=id; jcSave(); view='jobcost'; jcTab='summary'; renderSidebar(); renderView(); window.scrollTo(0,0); }
-function jcSave(){ try{ localStorage.setItem(JC_LS, JSON.stringify(jcr)); }catch{} }
+function jcSave(){ try{ localStorage.setItem(JC_LS, JSON.stringify(jcr)); }catch{} syncPush(JC_LS, jcr); }
 function jcAudit(action, detail){ (jcr.audit=jcr.audit||[]).unshift({ at:new Date().toISOString(), by:COMPANY.user, action, detail }); jcr.audit=jcr.audit.slice(0,300); }
 function jcNextId(prefix,arr){ let m=0; (arr||[]).forEach(x=>{ const g=((x.id||'').match(/(\d+)$/)||[])[1]; if(g&&+g>m) m=+g; }); return prefix+(m+1); }
 const jcMoney=n=>'₹'+Math.round(n||0).toLocaleString('en-IN');
@@ -909,14 +909,14 @@ function jcSummary(){
   const totalCost=direct+oh+ro+ho; const sales=p.originalCV; const margin=sales-totalCost;
   // ---- project timeline + status ----
   const today=new Date(nowDate()); const sD=new Date(p.start||nowDate()), fD=new Date(p.finish||p.expected||p.start||nowDate());
-  const totDays=Math.max(1,Math.round((fD-sD)/864e5));
-  const elapsed=Math.max(0,Math.min(totDays,Math.round((today-sD)/864e5)));
+  const totDays=Math.max(1,Math.round((fD.getTime()-sD.getTime())/864e5));
+  const elapsed=Math.max(0,Math.min(totDays,Math.round((today.getTime()-sD.getTime())/864e5)));
   const tPct=Math.round(elapsed/totDays*100), remaining=Math.max(0,totDays-elapsed);
   const spentPct=sales?Math.round(totalCost/sales*100):0;
   const steps=['Planning','In Progress','Nearing Completion','Completed'];
   let cur = p.status==='Completed'?3 : p.status==='Planning'?0 : p.status==='On Hold'?1 : (tPct>=80?2:1);
   const stColor=p.status==='Completed'?['#15803d','#dcfce7']:p.status==='On Hold'?['#b45309','#fef3c7']:['#0369a1','#e0f2fe'];
-  const fmtDate=d=>{ const x=new Date(d); return isNaN(x)?'—':x.getDate()+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][x.getMonth()]+' '+x.getFullYear(); };
+  const fmtDate=d=>{ const x=new Date(d); return isNaN(x.getTime())?'—':x.getDate()+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][x.getMonth()]+' '+x.getFullYear(); };
   const timeline=`<div class="jc-tl">
     <div class="jc-tl-top"><div class="jc-tl-title">Project timeline &amp; status <span class="t-badge" style="color:${stColor[0]};background:${stColor[1]}">${esc(p.status||'—')}</span></div>
       <div class="jc-tl-sub">${fmtDate(p.start)} → ${fmtDate(p.finish||p.expected)} · <b>${tPct}%</b> of schedule elapsed</div></div>
@@ -1055,7 +1055,7 @@ function openCostEntry(category, editId){
     </div></div>
     <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitCostEntry(${e?`'${e.id}'`:'null'})">${e?'Save changes':'Add entry'}</button></div></div>`);
 }
-function ceAmt(){ const q=parseFloat(val('ce-qty'))||0, r=parseFloat(val('ce-rate'))||0; if(q&&r){ const a=document.getElementById('ce-amt'); if(a) a.value=+(q*r).toFixed(2); } }
+function ceAmt(){ const q=parseFloat(val('ce-qty'))||0, r=parseFloat(val('ce-rate'))||0; if(q&&r){ const a=(document.getElementById('ce-amt') as HTMLInputElement); if(a) a.value=String(+(q*r).toFixed(2)); } }
 function submitCostEntry(editId){
   const cat=val('ce-cat'), code=val('ce-code'), desc=val('ce-desc'), amt=parseFloat(val('ce-amt'))||0;
   if(!desc) return toast('Description is required');
@@ -1083,7 +1083,7 @@ function openBoq(editId){
     </div></div>
     <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitBoq(${b?`'${b.id}'`:'null'})">${b?'Save':'Add BOQ item'}</button></div></div>`);
 }
-function submitBoq(editId){ const no=val('bq-no'), desc=val('bq-desc'); if(!no||!desc) return toast('BOQ No and description required'); const rec={boqNo:no,code:val('bq-code'),desc,unit:val('bq-unit'),boqQty:parseFloat(val('bq-qty'))||null,boqRate:parseFloat(val('bq-rate'))||null,revQty:parseFloat(val('bq-rqty'))||null}; if(editId){ Object.assign(jcr.boq.find(x=>x.id===editId),rec); jcAudit('edit','BOQ '+editId); toast('BOQ updated'); } else { const id=jcNextId('BQ-',jcr.boq); jcr.boq.push(Object.assign({id,archived:false},rec)); jcAudit('add','BOQ '+id); toast('BOQ item added'); } jcSave(); closeModal(); renderView(); }
+function submitBoq(editId){ const no=val('bq-no'), desc=val('bq-desc'); if(!no||!desc) return toast('BOQ No and description required'); const rec={boqNo:no,code:val('bq-code'),desc,unit:val('bq-unit'),boqQty:parseFloat(val('bq-qty'))||null,boqRate:parseFloat(val('bq-rate'))||null,revQty:parseFloat(val('bq-rqty'))||null}; if(editId){ Object.assign(jcr.boq.find(x=>x.id===editId),rec); jcAudit('edit','BOQ '+editId); toast('BOQ updated'); } else { const id=jcNextId('BQ-',jcr.boq); jcr.boq.push(Object.assign({id,projectId:jcr.currentProjectId,archived:false},rec)); jcAudit('add','BOQ '+id); toast('BOQ item added'); } jcSave(); closeModal(); renderView(); }
 function archiveBoq(id){ const b=jcr.boq.find(x=>x.id===id); if(!b) return; b.archived=!b.archived; jcAudit(b.archived?'archive':'restore','BOQ '+id); jcSave(); renderView(); }
 
 /* ---- Cost code ---- */
@@ -1112,7 +1112,7 @@ function openOverhead(editCode){
     </div></div>
     <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitOverhead(${o?`'${o.code}'`:'null'})">${o?'Save':'Add overhead'}</button></div></div>`);
 }
-function submitOverhead(editCode){ const code=val('oh-code'), desc=val('oh-desc'); if(!code||!desc) return toast('Code and description required'); const rec={desc,uptoLast:parseFloat(val('oh-last'))||0,thisMonth:parseFloat(val('oh-month'))||0,etc:parseFloat(val('oh-etc'))||0,revised:parseFloat(val('oh-rev'))||0}; if(editCode){ Object.assign(jcr.overheads.find(x=>x.code===editCode),rec); jcAudit('edit','Overhead '+editCode); } else { if(jcr.overheads.some(x=>x.code===code)) return toast('Code exists'); jcr.overheads.push(Object.assign({code},rec)); jcAudit('add','Overhead '+code); } jcSave(); closeModal(); renderView(); toast('Overhead saved'); }
+function submitOverhead(editCode){ const code=val('oh-code'), desc=val('oh-desc'); if(!code||!desc) return toast('Code and description required'); const rec={desc,uptoLast:parseFloat(val('oh-last'))||0,thisMonth:parseFloat(val('oh-month'))||0,etc:parseFloat(val('oh-etc'))||0,revised:parseFloat(val('oh-rev'))||0}; const pid=jcr.currentProjectId; if(editCode){ Object.assign(jcr.overheads.find(x=>x.code===editCode&&x.projectId===pid),rec); jcAudit('edit','Overhead '+editCode); } else { if(jcr.overheads.some(x=>x.code===code&&x.projectId===pid)) return toast('Code exists'); jcr.overheads.push(Object.assign({code,projectId:pid},rec)); jcAudit('add','Overhead '+code); } jcSave(); closeModal(); renderView(); toast('Overhead saved'); }
 
 /* ---- reporting period + audit + export ---- */
 function setReporting(v){ if(v){ jcr.reporting=v; jcSave(); renderView(); } }
@@ -1122,13 +1122,13 @@ function openAuditTrail(){
     <div class="m-body" style="padding-top:8px"><div class="tbl-scroll" style="max-height:60vh;overflow:auto"><table class="jc-tbl"><thead><tr><th>When</th><th>By</th><th>Action</th><th>Detail</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`);
 }
 function csvEscape(v){ return '"'+String(v==null?'':v).replace(/"/g,'""')+'"'; }
-function downloadCSV(name, rows){ const csv=rows.map(r=>r.map(csvEscape).join(',')).join('\n'); const a=document.createElement('a'); a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv); a.download=name; document.body.appendChild(a); a.click(); a.remove(); toast('Exported '+name); }
+function downloadCSV(name: string, rows: CsvRow[]){ const csv=rows.map(r=>r.map(csvEscape).join(',')).join('\n'); const a=document.createElement('a'); a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv); a.download=name; document.body.appendChild(a); a.click(); a.remove(); toast('Exported '+name); }
 function jcExport(){
-  if(jcTab==='jcl'){ const rows=[['Cost Code','Description',...JCR_CATS,'Cum Amount']]; jcr.costCodes.forEach(c=>{ const cells=JCR_CATS.map(cat=>codeCat(c.code,cat,jcBucket)); rows.push([c.code,c.desc,...cells,cells.reduce((s,v)=>s+v,0)]); }); downloadCSV('JCL_'+curProject().jobCode+'.csv',rows); }
-  else if(jcTab==='materials'||jcTab==='labour'){ const cat=jcTab==='materials'?'Materials':'Labour'; const rows=[['Date','Bill No','Description','Cost Code','Head','Unit','Qty','Rate','Amount','Source']]; jcr.entries.filter(e=>e.category===cat&&!e.archived&&e.projectId===jcr.currentProjectId).forEach(e=>rows.push([e.date,e.billNo,e.desc,e.code,e.head,e.unit,e.qty,e.rate,e.amount,e.source])); downloadCSV(cat+'_'+curProject().jobCode+'.csv',rows); }
-  else if(jcTab==='jcr'){ const rows=[['BOQ No','Cost Code','Description','Unit','BOQ Qty','BOQ Rate','BOQ Amount','Actual Cost','Variance']]; projBOQ().forEach(b=>{ const ba=(b.boqQty||0)*(b.boqRate||0); const act=codeTotal(b.code,'this'); rows.push([b.boqNo,b.code,b.desc,b.unit,b.boqQty,b.boqRate,ba,act,ba?ba-act:'']); }); downloadCSV('JCR_'+curProject().jobCode+'.csv',rows); }
-  else if(jcTab==='overheads'){ const rows=[['Code','Description','Upto Last Month','This Month','JSD','Estimate to Complete','Revised Estimate']]; projOH().forEach(o=>rows.push([o.code,o.desc,o.uptoLast,o.thisMonth,(Number(o.uptoLast)||0)+(Number(o.thisMonth)||0),o.etc,o.revised])); downloadCSV('Overheads_'+curProject().jobCode+'.csv',rows); }
-  else if(jcTab==='consumables'){ const rows=[['Cost Code','Description','Unit','Receipt','Rate','Rec Amount','Issue','Iss Amount','Stock','Stock Amount']]; projCons().forEach(c=>rows.push([c.code,c.desc,c.unit,c.receipt,c.rate,c.recAmt,c.issue,c.issAmt,c.stock,c.stkAmt])); downloadCSV('Consumables_'+curProject().jobCode+'.csv',rows); }
+  if(jcTab==='jcl'){ const rows: CsvRow[]=[['Cost Code','Description',...JCR_CATS,'Cum Amount']]; jcr.costCodes.forEach(c=>{ const cells=JCR_CATS.map(cat=>codeCat(c.code,cat,jcBucket)); rows.push([c.code,c.desc,...cells,cells.reduce((s,v)=>s+v,0)]); }); downloadCSV('JCL_'+curProject().jobCode+'.csv',rows); }
+  else if(jcTab==='materials'||jcTab==='labour'){ const cat=jcTab==='materials'?'Materials':'Labour'; const rows: CsvRow[]=[['Date','Bill No','Description','Cost Code','Head','Unit','Qty','Rate','Amount','Source']]; jcr.entries.filter(e=>e.category===cat&&!e.archived&&e.projectId===jcr.currentProjectId).forEach(e=>rows.push([e.date,e.billNo,e.desc,e.code,e.head,e.unit,e.qty,e.rate,e.amount,e.source])); downloadCSV(cat+'_'+curProject().jobCode+'.csv',rows); }
+  else if(jcTab==='jcr'){ const rows: CsvRow[]=[['BOQ No','Cost Code','Description','Unit','BOQ Qty','BOQ Rate','BOQ Amount','Actual Cost','Variance']]; projBOQ().forEach(b=>{ const ba=(b.boqQty||0)*(b.boqRate||0); const act=codeTotal(b.code,'this'); rows.push([b.boqNo,b.code,b.desc,b.unit,b.boqQty,b.boqRate,ba,act,ba?ba-act:'']); }); downloadCSV('JCR_'+curProject().jobCode+'.csv',rows); }
+  else if(jcTab==='overheads'){ const rows: CsvRow[]=[['Code','Description','Upto Last Month','This Month','JSD','Estimate to Complete','Revised Estimate']]; projOH().forEach(o=>rows.push([o.code,o.desc,o.uptoLast,o.thisMonth,(Number(o.uptoLast)||0)+(Number(o.thisMonth)||0),o.etc,o.revised])); downloadCSV('Overheads_'+curProject().jobCode+'.csv',rows); }
+  else if(jcTab==='consumables'){ const rows: CsvRow[]=[['Cost Code','Description','Unit','Receipt','Rate','Rec Amount','Issue','Iss Amount','Stock','Stock Amount']]; projCons().forEach(c=>rows.push([c.code,c.desc,c.unit,c.receipt,c.rate,c.recAmt,c.issue,c.issAmt,c.stock,c.stkAmt])); downloadCSV('Consumables_'+curProject().jobCode+'.csv',rows); }
   else { toast('Nothing to export on this tab'); }
 }
 function jcActBtns(){
@@ -1185,7 +1185,7 @@ function jobCodeExists(code){ return (jcr.projects||[]).some(p=>(p.jobCode||'').
 /* Reusable project initialization — used by the Projects module AND by Tender→Project conversion.
    proj: a project record (id/name/jobCode/... ). opts.boq: optional BOQ lines carrying budget qty/rate
    (from an awarded tender estimate); otherwise one empty BOQ line per shared cost code. */
-function initProject(proj, opts){
+function initProject(proj, opts?){
   opts=opts||{};
   jcr.projects.push(proj);
   const lines = (opts.boq && opts.boq.length) ? opts.boq
@@ -1205,9 +1205,10 @@ function submitCreateProject(){
 }
 
 /* ---------- reset ---------- */
-function reset(){ if(confirm('Reset all inventory & job-cost demo data to the seed?')){ resetData(); try{ localStorage.removeItem(JC_LS); }catch{} jcr=jcLoad(); renderView(); toast('Demo data reset'); } }
+function reset(){ if(confirm('Reset all inventory & job-cost demo data to the seed?')){ resetData(); try{ localStorage.removeItem(JC_LS); }catch{} jcr=jcLoad(); jcSave(); renderView(); toast('Demo data reset'); } }
 
 /* ---------- boot ---------- */
 /* defer first paint until all module scripts (tender/procure/billing) have defined their globals */
 function boot(){ initTheme(); renderSidebar(); renderTopbar(); renderView(); }
-if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot();
+// when sync.ts is in charge it calls boot() after every script has loaded
+if(!window.qtDeferBoot){ if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot(); }

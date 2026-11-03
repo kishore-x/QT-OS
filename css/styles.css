@@ -1218,3 +1218,13 @@ tr.t-cmp>td{background:var(--blue-l)!important}
   .ov-dash .ov-tbl td{padding:2.5px 8px}
   .ov-dash .ov-hphoto{height:64px}
 }
+
+/* ---------- server sync status ---------- */
+#sync-status{position:fixed;left:16px;bottom:16px;z-index:150;display:flex;align-items:center;gap:7px;padding:6px 11px;border-radius:999px;font-size:12px;font-weight:600;background:var(--surface);color:var(--muted);border:1px solid var(--line);box-shadow:0 2px 8px rgba(15,32,57,.08);pointer-events:auto;cursor:default}
+#sync-status::before{content:'';width:7px;height:7px;border-radius:50%;background:#16a34a}
+#sync-status.sync-saving::before{background:#2563eb;animation:syncPulse 1s infinite}
+#sync-status.sync-offline::before{background:#d97706}
+#sync-status.sync-error{color:#b91c1c}
+#sync-status.sync-error::before{background:#dc2626}
+@keyframes syncPulse{50%{opacity:.3}}
+@media print{#sync-status{display:none}}

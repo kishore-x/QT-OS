@@ -22,8 +22,8 @@ function mrLoad(){
   try{ const r=localStorage.getItem(MR_LS); if(r){ const d=JSON.parse(r); d.requests=d.requests||[]; d.pos=d.pos||[]; d.audit=d.audit||[]; return d; } }catch{}
   return mrSeed();
 }
-function mrSave(){ try{ localStorage.setItem(MR_LS, JSON.stringify(MR)); }catch{} }
-let MR=mrLoad();
+function mrSave(){ try{ localStorage.setItem(MR_LS, JSON.stringify(MR)); }catch{} syncPush(MR_LS, MR); }
+let MR: ProcurementState = mrLoad();
 function mrAudit(id,action,detail){ MR.audit.unshift({at:new Date().toISOString(),by:COMPANY.user,id,action,detail}); MR.audit=MR.audit.slice(0,500); }
 function mrNextId(){ let m=0; MR.requests.forEach(r=>{ const g=((r.id||'').match(/(\d+)$/)||[])[1]; if(g&&+g>m)m=+g; }); return 'MR-'+String(m+1).padStart(3,'0'); }
 function poNextId(){ let m=0; MR.pos.forEach(p=>{ const g=((p.id||'').match(/(\d+)$/)||[])[1]; if(g&&+g>m)m=+g; }); return 'PO-'+String(m+1).padStart(3,'0'); }
@@ -69,7 +69,7 @@ function mrQueue(){
   const awaitingPO=rs.filter(r=>r.status==='Approved');
   const inDelivery=rs.filter(r=>['PO Raised','Partially Delivered'].includes(r.status));
   const overdueReqs=rs.filter(mrOverdue);
-  const kpi=(v,l,cls)=>`<div class="kpi"><div class="kmid"><div class="kv" ${cls?`style="color:${cls}"`:''}>${v}</div><div class="kl">${l}</div></div></div>`;
+  const kpi=(v,l,cls?)=>`<div class="kpi"><div class="kmid"><div class="kv" ${cls?`style="color:${cls}"`:''}>${v}</div><div class="kl">${l}</div></div></div>`;
   const queueRow=r=>`<tr class="drill ${mrOverdue(r)?'t-cmp':''}" onclick="openMr('${r.id}')">
     <td class="c">${esc(r.id)}</td><td><b>${esc(projName(r.projectId))}</b><div class="t-cmp-src">${esc(locName(r.site)||'')} · ${esc(r.requestedBy||'')}</div></td>
     <td class="r">${(r.lines||[]).length} item(s)</td><td>${priTag(r.priority)}</td>
@@ -110,7 +110,7 @@ function mrRequestList(){
     <div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>ID</th><th>Project</th><th>Site</th><th>Requested by</th><th>Date</th><th>Needed by</th><th>Priority</th><th class="r">Lines</th><th>Status</th></tr></thead>
     <tbody>${rows}</tbody></table></div></div>`;
 }
-function bindProcure(){ const s=document.getElementById('mr-search'); if(s) s.oninput=()=>{ mrQ=s.value; const el=document.getElementById('app'); el.innerHTML=procureHTML(); const n=document.getElementById('mr-search'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); bindProcure(); } }; }
+function bindProcure(){ const s=(document.getElementById('mr-search') as HTMLInputElement); if(s) s.oninput=()=>{ mrQ=s.value; const el=document.getElementById('app'); el.innerHTML=procureHTML(); const n=(document.getElementById('mr-search') as HTMLInputElement); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); bindProcure(); } }; }
 
 /* ============================================================ purchase orders ============================================================ */
 function poOverdue(po){ return overdue(po.expectedDate) && !['Received','Cancelled'].includes(po.status); }
@@ -249,7 +249,7 @@ function openApprove(id){ const r=MR.requests.find(x=>x.id===id);
     <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitApprove('${id}')">Approve request</button></div></div>`);
 }
 function submitApprove(id){ const r=MR.requests.find(x=>x.id===id);
-  (r.lines||[]).forEach(l=>{ const v=document.getElementById('ap-'+l.id); l.approvedQty=v?Math.max(0,parseFloat(v.value)||0):(+l.qty||0); });
+  (r.lines||[]).forEach(l=>{ const v=(document.getElementById('ap-'+l.id) as HTMLInputElement); l.approvedQty=v?Math.max(0,parseFloat(v.value)||0):(+l.qty||0); });
   const any=(r.lines||[]).some(l=>(l.approvedQty||0)>0);
   mrAudit(id,'approve','approved '+apprTot(r)); closeModal();
   setMrStatus(id, any?'Approved':'Rejected', any?'Approved quantities set':'All lines rejected'); }
@@ -294,7 +294,7 @@ function openRaisePO(id){ const r=MR.requests.find(x=>x.id===id);
     <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitRaisePO('${id}')">Create PO</button></div></div>`);
 }
 function submitRaisePO(id){ const r=MR.requests.find(x=>x.id===id); const exp=val('rp-exp'); if(!exp) return toast('Set an expected delivery date');
-  const lines=[]; (r.lines||[]).forEach(l=>{ const qi=document.getElementById('rpq-'+l.id); if(!qi) return; const qty=parseFloat(qi.value)||0; const rate=parseFloat((document.getElementById('rpr-'+l.id)||{}).value)||0;
+  const lines=[]; (r.lines||[]).forEach(l=>{ const qi=(document.getElementById('rpq-'+l.id) as HTMLInputElement); if(!qi) return; const qty=parseFloat(qi.value)||0; const rate=parseFloat((document.getElementById('rpr-'+l.id) as HTMLInputElement|null)?.value)||0;
     if(qty>0){ lines.push({code:l.code,desc:l.desc,unit:l.unit,qty,rate,recdQty:0}); l.poQty=(+l.poQty||0)+qty; } });
   if(!lines.length) return toast('Enter at least one order quantity');
   const poId=poNextId();
@@ -319,7 +319,7 @@ function openReceive(poId){ const po=MR.pos.find(p=>p.id===poId); if(!po) return
 }
 function submitReceive(poId){ const po=MR.pos.find(p=>p.id===poId); if(!po) return; const loc=val('gr-loc')||po.deliverTo||'WH-MAIN'; const v=vendor(po.vendorId);
   const grn=val('gr-no')||('GRN-'+po.id); const dt=val('gr-date')||nowDate(); const recLines=[]; let any=false;
-  po.lines.forEach((l,i)=>{ const inp=document.getElementById('grq-'+i); const qty=inp?Math.max(0,parseFloat(inp.value)||0):0; const pend=(+l.qty||0)-(+l.recdQty||0); const take=Math.min(qty,pend);
+  po.lines.forEach((l,i)=>{ const inp=(document.getElementById('grq-'+i) as HTMLInputElement); const qty=inp?Math.max(0,parseFloat(inp.value)||0):0; const pend=(+l.qty||0)-(+l.recdQty||0); const take=Math.min(qty,pend);
     if(take>0){ l.recdQty=(+l.recdQty||0)+take; recLines.push({code:l.code,qty:take});
       addMovement({code:l.code,qty:take,from:'VENDOR',to:loc,type:'IN',ref:po.id+' · '+grn+' · '+(v?v.name:''),person:COMPANY.user,date:dt}); any=true; } });
   if(!any){ return toast('Enter a quantity to receive'); }
@@ -344,7 +344,7 @@ function mrSeed(){
   const pj=(typeof jcr!=='undefined'&&jcr.projects&&jcr.projects.length)?jcr.projects:[{id:'MC034'}];
   const p=id=>pj.find(x=>x.jobCode&&x.jobCode.replace(/\s/g,'')===id)||pj[0]||{id:'MC034'};
   const d=(off)=>{ const x=new Date(); x.setDate(x.getDate()+off); return x.toISOString().slice(0,10); };
-  const L=(code,qty,ap,po,rc)=>{ const it=(typeof item==='function')?item(code):null; return {id:'',code,desc:it?it.name:code,unit:it?it.unit:'',qty,approvedQty:ap,poQty:po||0,recdQty:rc||0,note:''}; };
+  const L=(code,qty,ap,po?,rc?)=>{ const it=(typeof item==='function')?item(code):null; return {id:'',code,desc:it?it.name:code,unit:it?it.unit:'',qty,approvedQty:ap,poQty:po||0,recdQty:rc||0,note:''}; };
   const reqs=[
     { id:'MR-001', projectId:p('MC034').id, site:'ST-SKCL', requestedBy:'K. Prakash', date:d(-6), neededBy:d(-1), priority:'Urgent', status:'Submitted',
       lines:[L('CEM-001',200,null),L('STL-012',3000,null)], quotes:[], notes:'Slab casting next week', history:[{at:new Date(Date.now()-6*864e5).toISOString(),by:'K. Prakash',from:'',to:'Submitted',note:'Request raised'}], poIds:[] },

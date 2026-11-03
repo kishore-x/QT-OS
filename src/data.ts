@@ -11,7 +11,7 @@ const COMPANY = { name: 'Qualtech Engineers Pvt. Ltd.', tagline: 'Engineering Ex
 
 const CATEGORIES = ['Cement','Steel','Concrete','Block','Shuttering','Scaffolding','Safety Equipment','Aggregate','Electrical','Plumbing','Finishing','Container','Equipment'];
 
-const LOCATIONS = [
+const LOCATIONS: StockLocation[] = [
   { id:'WH-MAIN',   name:'Main Warehouse',   type:'warehouse', note:'Central Stock Location' },
   { id:'ST-SKCL',   name:'SKCL Square',      type:'site' },
   { id:'ST-NEWRY',  name:'Newry Apartments', type:'site' },
@@ -23,7 +23,7 @@ const LOCATIONS = [
 // headline "total items" shown on each location card (matches the reference)
 const LOC_TOTALS = { 'WH-MAIN':14210, 'ST-SKCL':8234, 'ST-NEWRY':3508, 'ST-ASHOK':2374, 'ST-SASTRA':3603, 'ST-HEBBAL':2251 };
 
-const VENDORS = [
+const VENDORS: Vendor[] = [
   { id:'V-01', name:'Chettinad Cement',  gstin:'33AAACC1234A1Z5', phone:'+91 98400 11001' },
   { id:'V-02', name:'JSW Steel',         gstin:'33AAACJ5678B1Z2', phone:'+91 98400 11002' },
   { id:'V-03', name:'RDC Concrete',      gstin:'33AAACR9012C1Z8', phone:'+91 98400 11003' },
@@ -34,7 +34,7 @@ const VENDORS = [
 // filler SKUs so the master totals 126 items (realistic construction store)
 function buildFiller(){
   const cc={Cement:'CEM',Steel:'STL',Concrete:'CON',Block:'BLK',Shuttering:'SHT',Scaffolding:'SCF','Safety Equipment':'SFT',Aggregate:'AGG',Electrical:'ELE',Plumbing:'PLB',Finishing:'FIN',Equipment:'EQP'};
-  const fam=[
+  const fam: [string, string, string, string[], number[], number][] = [
     ['TMT Bar','Steel','kg',['10 mm','20 mm','25 mm','28 mm','32 mm'],[67,65,65,64,64],1000],
     ['MS Angle','Steel','kg',['40x40','50x50','65x65','75x75'],[72,72,70,70],800],
     ['MS Flat','Steel','kg',['25x5','40x6','50x6'],[74,73,72],800],
@@ -76,7 +76,7 @@ function buildFiller(){
     ['Angle grinder','Equipment','nos',['4 inch'],[2800],2],
     ['Wheelbarrow','Equipment','nos',['Standard'],[2400],3],
   ];
-  const seq={}; const out=[];
+  const seq: Record<string, number> = {}; const out: Item[] = [];
   fam.forEach(f=>{ const [pfx,cat,unit,vars,rates,reorder]=f; vars.forEach((v,i)=>{
     const c=cc[cat]||'MSC'; seq[c]=(seq[c]||100)+1; const code=c+'-'+seq[c]; const rate=rates[i]||rates[0];
     const type = cat==='Equipment'?'equipment':'material';
@@ -88,7 +88,7 @@ function buildFiller(){
 
 // Item master — unique code per material / container / equipment.
 // First 10 match the reference page-1 exactly (order, on-hand, reserved, value).
-const ITEMS = [
+const ITEMS: Item[] = [
   { code:'CEM-001', name:'OPC 53 Cement',          category:'Cement',          unit:'bag',   rate:415,    reorder:200, type:'material'  },
   { code:'CEM-002', name:'PPC Cement',             category:'Cement',          unit:'bag',   rate:390,    reorder:150, type:'material'  },
   { code:'STL-008', name:'TMT Bar 8 mm',           category:'Steel',           unit:'kg',    rate:68,     reorder:1000,type:'material'  },
@@ -174,7 +174,7 @@ const PURCHASE_ORDERS = [
   { id:'PO-2026-043', date:'2026-10-18', vendorId:'V-03', status:'Draft',    deliverTo:'ST-ASHOK',lines:[{code:'RMC-030', qty:60,   rate:5900}] },
 ];
 
-const SEED = {
+const SEED: InventoryState = {
   movements: [].concat(buildOpeningMovements(), RECENT_MOVEMENTS),
   reservations: RESERVATIONS.slice(),
   purchaseOrders: PURCHASE_ORDERS.slice(),

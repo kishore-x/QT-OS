@@ -1,1 +1,6 @@
 .DS_Store
+node_modules/
+# compiled from src/ by `npm run build`
+js/
+# SQLite database (contains company data)
+data/

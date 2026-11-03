@@ -1,0 +1,21 @@
+{
+  "name": "qualtech-os",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Qualtech Engineers — inventory / ERP dashboard",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p server/tsconfig.json",
+    "start": "npm run build && node --disable-warning=ExperimentalWarning server/server.ts",
+    "dev": "tsc -p tsconfig.json && (tsc -p tsconfig.json --watch --preserveWatchOutput & node --disable-warning=ExperimentalWarning --watch server/server.ts)"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.9.3"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  }
+}

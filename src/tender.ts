@@ -31,8 +31,8 @@ function tLoad(){
   try{ const r=localStorage.getItem(T_LS); if(r){ const d=JSON.parse(r); d.tenders=d.tenders||[]; d.audit=d.audit||[]; return d; } }catch{}
   return { tenders:[tSeedTender(), ...tExtraSeedTenders()], audit:[], counter:4 };
 }
-function tSave(){ try{ localStorage.setItem(T_LS, JSON.stringify(TDR)); }catch{} }
-let TDR=tLoad();
+function tSave(){ try{ localStorage.setItem(T_LS, JSON.stringify(TDR)); }catch{} syncPush(T_LS, TDR); }
+let TDR: TenderState = tLoad();
 function tAudit(tid, action, detail){ TDR.audit.unshift({ at:new Date().toISOString(), by:COMPANY.user, tid, action, detail }); TDR.audit=TDR.audit.slice(0,400); }
 function tNextId(){ let m=0; TDR.tenders.forEach(t=>{ const g=((t.id||'').match(/(\d+)$/)||[])[1]; if(g&&+g>m)m=+g; }); return 'TDR-'+String(m+1).padStart(3,'0'); }
 function tLineId(t){ let m=0; (t.boq||[]).forEach(b=>{ const g=((b.id||'').match(/(\d+)$/)||[])[1]; if(g&&+g>m)m=+g; }); return 'TB-'+(m+1); }
@@ -137,7 +137,7 @@ function tCatCosts(t){
   return {mat,lab,subEqp};
 }
 function tCostBreak(t){
-  const p=t.pricing||{};
+  const p: Partial<TenderPricing>=t.pricing||{};
   const cat=tCatCosts(t);
   const direct=cat.mat+cat.lab+cat.subEqp;
   const overhead=direct*(+p.overheadPct||0)/100;
@@ -219,7 +219,7 @@ function tbDonut(segs,total){
   return `<svg viewBox="0 0 140 140" class="tb-donut-svg">${arcs}<text x="70" y="66" text-anchor="middle" class="tb-donut-n">${total}</text><text x="70" y="84" text-anchor="middle" class="tb-donut-l">Total Tenders</text></svg>`;
 }
 function d3Trend(cur,prev){ if(!cur&&!prev) return `<span class="d3-tr flat">— <small>vs last month</small></span>`; const up=cur>=prev; const pct=prev?Math.round((cur-prev)/prev*100):100; return `<span class="d3-tr ${up?'up':'dn'}">${up?'↑':'↓'} ${Math.abs(pct)}% <small>vs last month</small></span>`; }
-function d3TimeAgo(iso){ const s=(Date.now()-new Date(iso))/1000; if(s<0) return 'just now'; if(s<3600) return Math.max(1,Math.round(s/60))+'m ago'; if(s<86400) return Math.round(s/3600)+'h ago'; const d=Math.round(s/86400); return d<30?d+'d ago':Math.round(d/30)+'mo ago'; }
+function d3TimeAgo(iso){ const s=(Date.now()-new Date(iso).getTime())/1000; if(s<0) return 'just now'; if(s<3600) return Math.max(1,Math.round(s/60))+'m ago'; if(s<86400) return Math.round(s/3600)+'h ago'; const d=Math.round(s/86400); return d<30?d+'d ago':Math.round(d/30)+'mo ago'; }
 function d3ActLabel(h){ if(h.to==='Submitted') return 'Tender submitted'; if(h.to==='Won') return 'Tender won'; if(h.to==='Lost') return 'Tender lost'; if(h.from==='') return 'Tender created'; return 'Moved to '+h.to; }
 const D3_BANNER_IMG='https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1400&q=70';
 function tenderDashboard(){
@@ -232,7 +232,7 @@ function tenderDashboard(){
   const openCount=ts.filter(t=>!['Won','Lost','Withdrawn'].includes(t.status)).length;
   const upcoming=ts.filter(t=>t.deadline && !['Won','Lost','Withdrawn'].includes(t.status))
     .sort((a,b)=>(a.deadline||'').localeCompare(b.deadline||'')).slice(0,5);
-  const daysTo=d=>{ const ms=new Date(d)-new Date(nowDate()); return Math.round(ms/864e5); };
+  const daysTo=d=>{ const ms=new Date(d).getTime()-new Date(nowDate()).getTime(); return Math.round(ms/864e5); };
   // trend: submitted bid value (₹ Cr) by month over the selected window, ending this month
   const now=new Date(nowDate()); const months=[];
   for(let i=tbPeriod-1;i>=0;i--){ const dt=new Date(now.getFullYear(),now.getMonth()-i,1); const key=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0');
@@ -240,7 +240,7 @@ function tenderDashboard(){
             + ts.filter(t=>!t.submittedDate && (t.receivedDate||'').slice(0,7)===key).reduce((s,t)=>s+(+t.estValue||0),0);
     months.push({label:TB_MON[dt.getMonth()], value:+(val/1e7).toFixed(2)}); }
   // donut: status mix
-  const donutDefs=[['Draft',by('Draft'),'#1e3a8a'],['Under Estimation',estimating,'#1d4ed8'],['Pending Approval',by('Awaiting Approval'),'#2563eb'],['Approved',by('Approved for Submission'),'#3b82f6'],['Submitted',by('Submitted'),'#60a5fa'],['In Negotiation',by('Under Negotiation'),'#93c5fd'],['Won',won,'#16a34a'],['Lost',lost,'#bfdbfe']].filter(d=>d[1]>0);
+  const donutDefs=([['Draft',by('Draft'),'#1e3a8a'],['Under Estimation',estimating,'#1d4ed8'],['Pending Approval',by('Awaiting Approval'),'#2563eb'],['Approved',by('Approved for Submission'),'#3b82f6'],['Submitted',by('Submitted'),'#60a5fa'],['In Negotiation',by('Under Negotiation'),'#93c5fd'],['Won',won,'#16a34a'],['Lost',lost,'#bfdbfe']] as [string, number, string][]).filter(d=>d[1]>0);
   const donutTotal=donutDefs.reduce((s,d)=>s+d[1],0)||1;
   const totT=ts.length||1;
   const kpi=(cls,icon,label,v)=>{ const pct=Math.round((label==='Total Tenders'?totT:v)/totT*100); return `<div class="k2 ${cls}">
@@ -360,8 +360,8 @@ function tenderList(){
     <div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>ID</th><th>Tender</th><th>Client</th><th>Owner</th><th>Deadline</th><th class="r">Est. value</th><th class="r">Bid value</th><th>Status</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table></div></div>`;
 }
-function bindTender(){ const s=document.getElementById('t-search'); if(s) s.oninput=()=>{ tListQ=s.value; const ts=TDR.tenders; renderTenderRowsOnly(); }; }
-function renderTenderRowsOnly(){ const el=document.getElementById('app'); el.innerHTML=tenderHTML(); const s=document.getElementById('t-search'); if(s){ s.focus(); s.setSelectionRange(s.value.length,s.value.length); bindTender(); } }
+function bindTender(){ const s=(document.getElementById('t-search') as HTMLInputElement); if(s) s.oninput=()=>{ tListQ=s.value; const ts=TDR.tenders; renderTenderRowsOnly(); }; }
+function renderTenderRowsOnly(){ const el=document.getElementById('app'); el.innerHTML=tenderHTML(); const s=(document.getElementById('t-search') as HTMLInputElement); if(s){ s.focus(); s.setSelectionRange(s.value.length,s.value.length); bindTender(); } }
 
 /* ============================================================ create tender ============================================================ */
 function openCreateTender(){
@@ -501,19 +501,19 @@ function openTBoq(tid,bid){
     <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitTBoq('${tid}','${bid||''}')">${b?'Save':'Add item'}</button></div></div>`);
   tbPreview();
 }
-function tbCodeDesc(){ const sel=document.getElementById('tb-code'); const d=document.getElementById('tb-desc'); if(sel&&d&&!d.value){ const c=(jcr.costCodes||[]).find(x=>x.code===sel.value); if(c) d.value=c.desc; } }
+function tbCodeDesc(){ const sel=(document.getElementById('tb-code') as HTMLInputElement); const d=(document.getElementById('tb-desc') as HTMLInputElement); if(sel&&d&&!d.value){ const c=(jcr.costCodes||[]).find(x=>x.code===sel.value); if(c) d.value=c.desc; } }
 function tbPreview(){ const g=id=>parseFloat(val(id))||0; const rate=g('tb-mat')+g('tb-lab')+g('tb-sub')+g('tb-eqp')+g('tb-oth'); const amt=g('tb-qty')*rate; const r=document.getElementById('tb-rate'),a=document.getElementById('tb-amt'); if(r)r.textContent=jcMoney(rate); if(a)a.textContent=jcMoney(amt); }
 function submitTBoq(tid,bid){
   const t=TDR.tenders.find(x=>x.id===tid); if(!t) return;
   const desc=val('tb-desc'), qty=parseFloat(val('tb-qty'))||0; if(!desc||qty<=0) return toast('Description and a quantity are required');
-  const rec={ itemNo:val('tb-no'), desc, code:val('tb-code'), unit:val('tb-unit'),
+  const rec: TenderBoqLine={ itemNo:val('tb-no'), desc, code:val('tb-code'), unit:val('tb-unit'),
     qty, matRate:parseFloat(val('tb-mat'))||0, labRate:parseFloat(val('tb-lab'))||0, subRate:parseFloat(val('tb-sub'))||0, eqpRate:parseFloat(val('tb-eqp'))||0, otherRate:parseFloat(val('tb-oth'))||0 };
   if(bid){ const b=t.boq.find(x=>x.id===bid); Object.assign(b,rec); tAudit(tid,'edit-boq',desc); }
   else { rec.id=tLineId(t); t.boq.push(rec); tAudit(tid,'add-boq',desc); }
   tSave(); closeModal(); renderView(); toast('BOQ item saved');
 }
 function delTBoq(tid,bid){ if(!confirm('Remove this BOQ item?')) return; const t=TDR.tenders.find(x=>x.id===tid); t.boq=t.boq.filter(b=>b.id!==bid); tAudit(tid,'remove-boq',bid); tSave(); renderView(); toast('BOQ item removed'); }
-function exportTBoq(tid){ const t=TDR.tenders.find(x=>x.id===tid); const rows=[['Item','Description','Code','Unit','Qty','Material','Labour','Sub','Equip','Other','UnitRate','Amount']];
+function exportTBoq(tid){ const t=TDR.tenders.find(x=>x.id===tid); const rows: CsvRow[]=[['Item','Description','Code','Unit','Qty','Material','Labour','Sub','Equip','Other','UnitRate','Amount']];
   (t.boq||[]).forEach(b=>rows.push([b.itemNo,b.desc,b.code,b.unit,b.qty,b.matRate,b.labRate,b.subRate,b.eqpRate,b.otherRate,tLineRate(b),tLineAmt(b)])); tDownloadCSV(t.id+'-BOQ.csv',rows); }
 
 /* ---------- Excel-style import (paste rows) ---------- */
@@ -538,15 +538,15 @@ function openImportBoq(tid){
 /* shared: read a chosen CSV file's text into a target textarea, then run a callback */
 function readCsvFile(input, targetId, cb){ const f=input.files&&input.files[0]; if(!f) return;
   if(!/\.csv$/i.test(f.name) && f.type!=='text/csv' && f.type!=='application/vnd.ms-excel'){ toast('Please choose a .csv file'); return; }
-  const r=new FileReader(); r.onload=e=>{ const el=document.getElementById(targetId); if(el){ el.value=String(e.target.result||'').trim(); } toast('Loaded '+f.name); if(cb) cb(); };
+  const r=new FileReader(); r.onload=e=>{ const el=(document.getElementById(targetId) as HTMLInputElement); if(el){ el.value=String(e.target.result||'').trim(); } toast('Loaded '+f.name); if(cb) cb(); };
   r.onerror=()=>toast('Could not read the file'); r.readAsText(f); }
 /* optional drag-and-drop onto the upload box */
 function setupDrop(inputId, targetId, cb){ const box=document.querySelector('.t-upload'); if(!box) return;
   ['dragover','dragenter'].forEach(ev=>box.addEventListener(ev,e=>{ e.preventDefault(); box.classList.add('drag'); }));
   ['dragleave','drop'].forEach(ev=>box.addEventListener(ev,e=>{ e.preventDefault(); box.classList.remove('drag'); }));
-  box.addEventListener('drop',e=>{ const f=e.dataTransfer.files&&e.dataTransfer.files[0]; if(!f) return; const inp=document.getElementById(inputId); try{ const dt=new DataTransfer(); dt.items.add(f); inp.files=dt.files; }catch{} readCsvFile({files:[f]}, targetId, cb); }); }
+  box.addEventListener('drop',e=>{ const dt0=(e as DragEvent).dataTransfer; const f=dt0.files&&dt0.files[0]; if(!f) return; const inp=(document.getElementById(inputId) as HTMLInputElement); try{ const dt=new DataTransfer(); dt.items.add(f); inp.files=dt.files; }catch{} readCsvFile({files:[f]}, targetId, cb); }); }
 function stripHeader(lines){ if(!lines.length) return lines; const first=lines[0].toLowerCase(); if(/(^|[,\t])(item|sl|s\.no|description|desc)([,\t]|$)/.test(first) || /description/.test(first)) return lines.slice(1); return lines; }
-function parseImportRows(){ const raw=val('imp-data'); if(!raw) return [];
+function parseImportRows(): TenderBoqLine[] { const raw=val('imp-data'); if(!raw) return [];
   let lines=raw.split(/\r?\n/).map(l=>l.trim()).filter(Boolean); lines=stripHeader(lines);
   return lines.map(l=>{ const c=csvSplit(l);
     return { itemNo:c[0]||'', desc:c[1]||'', code:c[2]||'', unit:c[3]||'', qty:parseFloat(c[4])||0, matRate:parseFloat(c[5])||0, labRate:parseFloat(c[6])||0, subRate:parseFloat(c[7])||0, eqpRate:parseFloat(c[8])||0, otherRate:parseFloat(c[9])||0 }; })
@@ -587,7 +587,7 @@ function addStandardItems(tid){
 }
 function commitStandardItems(tid){
   const t=TDR.tenders.find(x=>x.id===tid); if(!t) return;
-  standardWorkItems().forEach(w=>{ const rec=Object.assign({},w); rec.id=tLineId(t); rec.itemNo=String((t.boq||[]).length+1); (t.boq=t.boq||[]).push(rec); });
+  standardWorkItems().forEach(w=>{ const rec: TenderBoqLine=Object.assign({},w); rec.id=tLineId(t); rec.itemNo=String((t.boq||[]).length+1); (t.boq=t.boq||[]).push(rec); });
   tAudit(tid,'add-standard-items', standardWorkItems().length+' work items'); tSave(); closeModal(); renderView(); toast('Added standard work items — edit quantities & rates as needed');
 }
 
@@ -606,7 +606,7 @@ function twRates(t){
     <div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>Item</th><th>Code</th><th>Category</th><th>Unit</th><th class="r">Rate</th><th>Date</th><th>Source project</th><th></th></tr></thead><tbody id="t-raterows">${rows}</tbody></table></div>
     <div class="jc-hint" style="padding:12px 20px">${svg(IC.jobcost)} Reference rates drawn from every project's material &amp; labour cost ledgers — click any row for its full rate history. Historical rates are guidance, not guaranteed current prices.</div></div>`;
 }
-function renderRateRows(){ const el=document.getElementById('app'); const foc=document.activeElement&&document.activeElement.id==='t-rateq'; el.innerHTML=tenderHTML(); if(foc){ const i=document.getElementById('t-rateq'); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length); } } }
+function renderRateRows(){ const el=document.getElementById('app'); const foc=document.activeElement&&document.activeElement.id==='t-rateq'; el.innerHTML=tenderHTML(); if(foc){ const i=(document.getElementById('t-rateq') as HTMLInputElement); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length); } } }
 // drill-down: full history for one item (all occurrences across projects) + stats + trend
 function openRateDetail(i){
   const r=(window._rateRecs||[])[i]; if(!r) return;
@@ -643,7 +643,7 @@ function openRateDetail(i){
 function rateDetailCSV(i){ const r=(window._rateRecs||[])[i]; if(!r) return;
   const pname=id=>{ const p=(jcr.projects||[]).find(x=>x.id===id); return p?p.jobCode:id; };
   const dkey=String(r.desc||'').trim().toLowerCase();
-  const rows=[['Item','Project','Code','Category','Qty','Unit','Rate','Amount','Date','Source']];
+  const rows: CsvRow[]=[['Item','Project','Code','Category','Qty','Unit','Rate','Amount','Date','Source']];
   (jcr.entries||[]).filter(e=>!e.archived&&String(e.desc||'').trim().toLowerCase()===dkey).forEach(e=>rows.push([r.desc,pname(e.projectId),e.code,e.category,e.qty,e.unit,e.rate,e.amount,e.date,e.source||e.createdBy||'']));
   tDownloadCSV((r.desc||'rate').replace(/[^a-z0-9]+/gi,'-')+'-history.csv',rows); }
 
@@ -775,8 +775,8 @@ function commitImportQuotes(tid){ const rows=parseImportQuotes(); if(!rows.lengt
 
 /* ---------- Bid pricing & profitability ---------- */
 function twPricing(t,c){
-  const p=t.pricing||{}; const locked=t.status==='Won';
-  const line=(l,v,cls)=>`<tr class="${cls||''}"><td>${l}</td><td class="r b">${v}</td></tr>`;
+  const p: Partial<TenderPricing>=t.pricing||{}; const locked=t.status==='Won';
+  const line=(l,v,cls?)=>`<tr class="${cls||''}"><td>${l}</td><td class="r b">${v}</td></tr>`;
   const verRows=(t.versions||[]).map(v=>`<tr><td class="c">v${v.ver}</td><td>${esc((v.at||'').slice(0,10))}</td><td>${esc(v.by||'')}</td><td class="r">${jcMoney(v.totalCost)}</td><td class="r b">${jcMoney(v.bidValue)}</td><td class="r">${jcMoney(v.profit)}</td><td class="r">${(v.margin||0).toFixed(1)}%</td><td>${esc(v.note||'')}</td></tr>`).join('')
     ||`<tr class="empty-row"><td colspan="8">No saved versions yet.</td></tr>`;
   const ov=t.directOverride&&t.directOverride.on;
@@ -820,7 +820,7 @@ function pricingBenchHTML(t,c){
   if(!pricingBench){
     body=`<div class="t-cmp-ph" style="padding:28px">${svg(IC.history)}<p>Choose a past project (actual cost) or an earlier tender (estimate) to benchmark this bid against — you'll get a line-by-line comparison with variance.</p></div>`;
   } else {
-    const [kind,id]=pricingBench.split(':'); let b, label, meta={};
+    const [kind,id]=pricingBench.split(':'); let b, label, meta: { basis?: string; headline?: string; headVal?: number; area?: number; pts?: number; ptsLabel?: string }={};
     if(kind==='proj'){ const p=(jcr.projects||[]).find(x=>x.id===id); b=projCatCosts(id); label=(p?p.name:id)+' · actual cost';
       meta={ basis:'Actual cost', headline:'Contract value', headVal:(p&&p.originalCV)||0, area:(p&&p.builtUpArea)||0, pts:(jcr.entries||[]).filter(e=>e.projectId===id&&!e.archived).length, ptsLabel:'cost entries' }; }
     else { const x=TDR.tenders.find(y=>y.id===id); b=tenderCatCosts(x); label=(x?x.name:id)+' · estimate';
@@ -863,7 +863,7 @@ function pricingBenchHTML(t,c){
       <option value="">Choose a benchmark…</option>${projOpts}${tenOpts}</select></div>
     ${body}</div>`;
 }
-function openPricing(tid){ const t=TDR.tenders.find(x=>x.id===tid); const p=t.pricing||{};
+function openPricing(tid){ const t=TDR.tenders.find(x=>x.id===tid); const p: Partial<TenderPricing>=t.pricing||{};
   openModal(`<div class="modal">${mh('',IC.jobcost,'Revise pricing','Saves a new bid version — previous versions are kept')}
     <div class="m-body"><div class="grid2">
       <div class="fld"><label>Overhead %</label><input class="f" id="pr-oh" type="number" step="any" value="${p.overheadPct||0}"></div>
@@ -980,7 +980,7 @@ function openStatus(tid){ const t=TDR.tenders.find(x=>x.id===tid); const nexts=(
     <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="applyStatusFromModal('${tid}')">Update status</button></div></div>`);
 }
 function applyStatusFromModal(tid){ applyStatus(tid, val('st-to'), val('st-note')); closeModal(); }
-function applyStatus(tid, to, note, silent){
+function applyStatus(tid, to, note, silent?){
   const t=TDR.tenders.find(x=>x.id===tid); if(!t||!to) return;
   if(to==='Won'){ if(!silent) toast('Use Convert to Project to mark Won'); return; }
   const allowed=(T_TRANSITIONS[t.status]||[]);
@@ -1087,6 +1087,6 @@ function submitEditTender(tid){ const t=TDR.tenders.find(x=>x.id===tid);
   tAudit(tid,'edit-tender',t.name); tSave(); closeModal(); renderView(); toast('Tender updated'); }
 
 /* ---------- CSV helper ---------- */
-function tDownloadCSV(name, rows){ const esc=v=>{ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+function tDownloadCSV(name: string, rows: CsvRow[]){ const esc=v=>{ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
   const csv=rows.map(r=>r.map(esc).join(',')).join('\n'); const blob=new Blob([csv],{type:'text/csv'}); const a=document.createElement('a');
   a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); }
