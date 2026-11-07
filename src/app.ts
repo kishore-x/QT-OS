@@ -1598,6 +1598,16 @@ function dashboardHTML(){
     ${invRows.length?invRows.map(r=>{const s=invStat(r);return `<tr class="cl" onclick="go('inventory')"><td class="b"><span class="ov-rowic sm">${svg(IC.inventory)}</span>${esc(r.it.name)}</td><td class="r">${num(r.oh)}</td><td class="mut">${esc(r.it.unit)}</td><td class="r mut">${num(r.it.reorder||0)}</td><td><span class="ov-dot ${s[1]}"></span>${s[0]}</td><td class="r mut">${fmtFull(lastMv(r.it.code))}</td></tr>`;}).join(''):'<tr><td colspan="6" class="ov-empty">No materials yet.</td></tr>'}
     </tbody></table>
   </div>
+
+  ${(()=>{ const al=collectAlerts(); const top=al.slice(0,4);
+    const sevCls={critical:'red',warning:'amber',info:'blue'};
+    const sevLbl={critical:'Critical',warning:'Attention',info:'Info'};
+    return `<div class="ov-card ov-ac">
+      <div class="ov-card-h"><h2><span class="ov-hic">${svg(IC.bell)}</span>Action Center${al.length?` <span class="ov-count">${al.length}</span>`:''}</h2><a class="ov-link" onclick="go('action')">View all ${svg(IC.arrow)}</a></div>
+      <table class="ov-tbl"><thead><tr><th>Needs attention</th><th>Area</th><th>Detail</th><th>Priority</th></tr></thead><tbody>
+      ${top.length?top.map(a=>`<tr class="cl" onclick="go('${a.nav}')"><td class="b"><span class="ov-dot ${sevCls[a.sev]}"></span>${esc(a.title)}</td><td class="mut">${esc(a.cat)}</td><td class="mut">${esc(a.detail)}</td><td><span class="ov-badge ${sevCls[a.sev]}">${sevLbl[a.sev]}</span></td></tr>`).join(''):`<tr><td colspan="4" class="ov-empty">All clear — nothing needs attention right now.</td></tr>`}
+      </tbody></table>
+    </div>`; })()}
   </div>`;
 }
 function setDDoc(v){ dDoc=v; renderView(); }
