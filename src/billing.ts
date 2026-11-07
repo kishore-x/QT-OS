@@ -38,7 +38,7 @@ function billCatalogOpts(type){
 let bView='list', bType='quotation', bFilter='all';
 let billDraft=null;
 function goBill(v){ bView=v; renderView(); window.scrollTo(0,0); }
-function openNewDoc(type){ bType=type; billDraft={ party:'', partyId:'', ref:'', subject:'', date:nowDate(), dueDate:'', poNumber:'', terms:(type==='quotation')?'':PAY_TERMS[0], lines:[], _selOnly:false }; bView='new'; renderView(); window.scrollTo(0,0); }
+function openNewDoc(type){ bType=type; billDraft={ party:'', partyId:'', ref:'', subject:'', date:nowDate(), dueDate:'', poNumber:'', projectId:(typeof jcr!=='undefined'?(jcr.currentProjectId||null):null), terms:(type==='quotation')?'':PAY_TERMS[0], lines:[], _selOnly:false }; bView='new'; renderView(); window.scrollTo(0,0); }
 
 /* ============================================================ router ============================================================ */
 function billingHTML(){ return bView==='new'? billForm() : billList(); }
@@ -53,21 +53,22 @@ function billList(){
   const docs=BILL.docs.slice().sort((a,b)=>(b.date||b.createdAt||'').localeCompare(a.date||a.createdAt||''));
   const cnt=t=>docs.filter(d=>d.type===t).length;
   const q=(bFilter&&bFilter!=='all')?docs.filter(d=>d.type===bFilter):docs;
+  const projLabel=d=>d.projectId?projName(d.projectId):(d.ref||d.poNumber||'—');
   const term=(billListQ||'').trim().toLowerCase();
-  const shown=term? q.filter(d=>[d.number,d.party,d.subject,d.poNumber].some(x=>String(x||'').toLowerCase().includes(term))) : q;
+  const shown=term? q.filter(d=>[d.number,d.party,d.subject,d.poNumber,projLabel(d)].some(x=>String(x||'').toLowerCase().includes(term))) : q;
   const totPages=Math.max(1,Math.ceil(shown.length/B_PER)); if(bPage>totPages) bPage=1;
   const page=shown.slice((bPage-1)*B_PER,bPage*B_PER);
   const st=(t,f)=>docs.filter(d=>d.type===t&&f(d.status)).length;
   const outstanding=docs.filter(d=>d.type==='invoice'&&!['Paid','Draft'].includes(d.status)).reduce((s,d)=>s+billTotals(d).total,0);
-  const kpi=(type,icon,v,sub)=>`<div class="bcd-kpi" onclick="bFilter='${type}';bPage=1;renderView()"><div class="bcd-k-ic">${svg(icon)}</div><div class="bcd-k-body"><div class="bcd-k-lab">${BILL_META[type].plural.toUpperCase()}</div><div class="bcd-k-v">${v}</div><div class="bcd-k-sub">${sub}</div></div><span class="bcd-k-ar">${svg(IC.arrow)}</span></div>`;
-  const create=(type)=>`<div class="bcd-create" onclick="openNewDoc('${type}')"><div class="bcd-c-ic">${svg(BILL_META[type].party==='Vendor'?IC.procurement:IC.billing)}</div><div class="bcd-c-body"><div class="bcd-c-t">${svg(IC.plus)} Create ${BILL_META[type].label}</div><div class="bcd-c-s">${esc(BILL_META[type].desc)}</div></div><span class="bcd-k-ar">${svg(IC.arrow)}</span></div>`;
-  const ftab=(v,l)=>`<button class="bcd-ftab ${bFilter===v?'on':''}" onclick="bFilter='${v}';bPage=1;renderView()">${l}</button>`;
-  const rows=page.map(d=>{ const t=billTotals(d); return `<tr class="drill" onclick="billView('${d.id}')">
+  const kpi=(type,icon,v,sub)=>`<div class="bcd-kpi" onclick="bFilter='${jsid(type)}';bPage=1;renderView()"><div class="bcd-k-ic">${svg(icon)}</div><div class="bcd-k-body"><div class="bcd-k-lab">${BILL_META[type].plural.toUpperCase()}</div><div class="bcd-k-v">${v}</div><div class="bcd-k-sub">${sub}</div></div><span class="bcd-k-ar">${svg(IC.arrow)}</span></div>`;
+  const create=(type)=>`<div class="bcd-create" onclick="openNewDoc('${jsid(type)}')"><div class="bcd-c-ic">${svg(BILL_META[type].party==='Vendor'?IC.procurement:IC.billing)}</div><div class="bcd-c-body"><div class="bcd-c-t">${svg(IC.plus)} Create ${BILL_META[type].label}</div><div class="bcd-c-s">${esc(BILL_META[type].desc)}</div></div><span class="bcd-k-ar">${svg(IC.arrow)}</span></div>`;
+  const ftab=(v,l)=>`<button class="bcd-ftab ${bFilter===v?'on':''}" onclick="bFilter='${jsid(v)}';bPage=1;renderView()">${l}</button>`;
+  const rows=page.map(d=>{ const t=billTotals(d); return `<tr class="drill" onclick="billView('${jsid(d.id)}')">
     <td class="c" onclick="event.stopPropagation()"><input type="checkbox"></td>
     <td><a class="bcd-no">${esc(d.number)}</a></td><td>${billTypeBadge(d.type)}</td>
-    <td><b>${esc(d.party||'—')}</b></td><td>${esc(d.ref||d.poNumber||'—')}</td>
+    <td><b>${esc(d.party||'—')}</b></td><td>${esc(projLabel(d))}</td>
     <td>${esc(d.date||'')}</td><td class="r b">${money(t.total)}</td><td>${billBadge(d.status)}</td>
-    <td onclick="event.stopPropagation()"><div class="bcd-acts"><button class="btn ghost sm" onclick="billPrint('${d.id}')">${svg(IC.billing)} PDF</button><button class="bcd-more">⋯</button></div></td></tr>`;}).join('')
+    <td onclick="event.stopPropagation()"><div class="bcd-acts"><button class="btn ghost sm" onclick="billPrint('${jsid(d.id)}')">${svg(IC.billing)} PDF</button><button class="bcd-more">⋯</button></div></td></tr>`;}).join('')
     ||`<tr class="empty-row"><td colspan="9">No documents match.</td></tr>`;
   const pg=[]; for(let i=1;i<=Math.min(totPages,3);i++) pg.push(i); if(totPages>4) pg.push('…'); if(totPages>3) pg.push(totPages);
   return `
@@ -113,19 +114,20 @@ function billForm(){
   const termSelect=`<select class="f" id="bl-terms" onchange="billDraft.terms=this.value;billRecalc()">${PAY_TERMS.map(t=>`<option ${billDraft.terms===t?'selected':''}>${esc(t)}</option>`).join('')}</select>`;
   const termText=`<input class="f" id="bl-terms" placeholder="e.g. 50% advance, balance on delivery" value="${esc(billDraft.terms||'')}" oninput="billDraft.terms=this.value;billRecalc()">`;
   const fld=(lab,inner,hint?,col2?)=>`<div class="fld ${col2?'col2':''}"><label>${lab}</label>${inner}${hint?`<div class="bl-hint">${hint}</div>`:''}</div>`;
+  const projFld=fld('Project',`<select class="f" id="bl-proj" onchange="billDraft.projectId=this.value||null">${billProjectOpts()}</select>`,'Links this document to that project’s Documents tab');
   const party=fld(m.party+' <span class="req">*</span>',`<select class="f" id="bl-party" onchange="billSetParty(this.value)">${partyOpts}</select>`);
   const partyid=fld(m.party+' ID',`<input class="f" id="bl-partyid" placeholder="Auto-filled on selecting ${m.party.toLowerCase()}" value="${esc(billDraft.partyId)}" readonly>`);
   const subject=fld('Subject',`<input class="f" id="bl-subject" placeholder="${bType==='vpo'?'e.g. Steel for MC 041':'e.g. Civil works — Phase 1'}" value="${esc(billDraft.subject)}" oninput="billDraft.subject=this.value">`);
   const poNo=fld(bType==='vpo'?'Our reference':'Customer PO number',`<input class="f" id="bl-po" placeholder="PO/2026/…" value="${esc(billDraft.poNumber)}" oninput="billDraft.poNumber=this.value">`);
   let fields;
-  if(bType==='quotation'||bType==='cpo') fields=party+partyid+subject
+  if(bType==='quotation'||bType==='cpo') fields=projFld+party+partyid+subject
     +fld(bType==='cpo'?'Required delivery date':'Required completion date',`<input class="f" id="bl-due" type="date" value="${esc(billDraft.dueDate)}" oninput="billDraft.dueDate=this.value">`,bType==='cpo'?'Blank → 30 days':'Blank → valid 30 days')
     +poNo+fld('Payment terms',bType==='cpo'?termSelect:termText);
-  else if(bType==='invoice') fields=party+partyid
+  else if(bType==='invoice') fields=projFld+party+partyid
     +fld('Quotation reference',`<select class="f" id="bl-ref" onchange="billDraft.ref=this.value">${billRefOpts()}</select>`)
     +fld('Due date',`<input class="f" id="bl-due" type="date" value="${esc(billDraft.dueDate)}" oninput="billDraft.dueDate=this.value">`,'Blank → 14 days from today')
     +poNo+fld('Payment terms',termSelect)+fld('Subject',`<input class="f" id="bl-subject" placeholder="Construction services" value="${esc(billDraft.subject)}" oninput="billDraft.subject=this.value">`,'',true);
-  else fields=party+partyid+subject
+  else fields=projFld+party+partyid+subject
     +fld('Expected delivery',`<input class="f" id="bl-due" type="date" value="${esc(billDraft.dueDate)}" oninput="billDraft.dueDate=this.value">`,'Blank → 14 days from today')
     +poNo+fld('Payment terms',termSelect);
   const svcTitle=bType==='vpo'?'Items to order':bType==='invoice'?'Services to invoice':bType==='cpo'?'Items ordered':'Services to quote';
@@ -160,8 +162,9 @@ function billForm(){
 }
 function billToggleAll(){ const allOn=billDraft.lines.length>0 && billDraft.lines.every(l=>l.use); billDraft.lines.forEach(l=>l.use=!allOn); renderBillLines(); }
 function billRefOpts(){ const q=BILL.docs.filter(d=>d.type==='quotation'); return `<option value="">All stages — none (direct invoice)</option>`+q.map(d=>`<option value="${d.id}" ${billDraft.ref===d.id?'selected':''}>${esc(d.number)} — ${esc(d.party)}</option>`).join(''); }
+function billProjectOpts(){ const ps=(typeof jcr!=='undefined'?jcr.projects:[]).filter(p=>!p.archived); return `<option value="">— no project —</option>`+ps.map(p=>`<option value="${p.id}" ${p.id===billDraft.projectId?'selected':''}>${esc(p.name)} (${esc(p.jobCode)})</option>`).join(''); }
 function billSetParty(v){ billDraft.party=v; billDraft.partyId=billPartyId(bType,v); const e=(document.getElementById('bl-partyid') as HTMLInputElement); if(e) e.value=billDraft.partyId; billRecalc(); }
-function billAddCatalog(){ const v=val('bl-cat'); if(!v) return; let line; if(v.slice(0,2)==='m:'){ const it=item(v.slice(2)); line={desc:it.name,cat:it.category,qty:1,rate:it.rate||0,tax:18,use:true}; } else { const c=(jcr.costCodes||[]).find(x=>x.code===v.slice(2)); line={desc:(c?c.code+' — '+c.desc:v.slice(2)),cat:'Works',qty:1,rate:0,tax:18,use:true}; } billDraft.lines.push(line); renderBillLines(); }
+function billAddCatalog(){ const v=val('bl-cat'); if(!v) return; let line; if(v.slice(0,2)==='m:'){ const it=item(v.slice(2)); if(!it) return toast('That item is no longer in the catalog'); line={desc:it.name,cat:it.category,qty:1,rate:it.rate||0,tax:18,use:true}; } else { const c=(jcr.costCodes||[]).find(x=>x.code===v.slice(2)); line={desc:(c?c.code+' — '+c.desc:v.slice(2)),cat:'Works',qty:1,rate:0,tax:18,use:true}; } billDraft.lines.push(line); renderBillLines(); }
 function billAddCustom(){ billDraft.lines.push({desc:'',cat:'',qty:1,rate:0,tax:18,use:true}); renderBillLines(); }
 function renderBillLines(){
   const tb=document.getElementById('bl-lines'); if(!tb) return;

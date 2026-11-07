@@ -406,6 +406,8 @@ interface BillDoc {
   poNumber: string;
   /** id of the quotation this document was raised from */
   ref?: string;
+  /** project this document is billed against — shown in that project's Documents tab */
+  projectId?: string | null;
   date: string;
   dueDate: string;
   terms: string;

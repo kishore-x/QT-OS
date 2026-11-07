@@ -19,7 +19,7 @@
    ============================================================ */
 'use strict';
 
-const SYNC_BUILD = '35';
+const SYNC_BUILD = '42';
 const SYNC_SCRIPTS = ['data', 'jcr-data', 'app', 'tender', 'procure', 'billing'];
 /** must match the *_LS keys in the app and STORE_KEYS on the server */
 const SYNC_KEYS = ['qualtech-inv-v3', 'qualtech-jcr-v3', 'qualtech-tender-v2', 'qualtech-mr-v1', 'qualtech-billing-v2'];

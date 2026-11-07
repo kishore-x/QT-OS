@@ -49,7 +49,7 @@ function goMr(v){ mrView=v; renderView(); window.scrollTo(0,0); }
 function openMr(id){ curMrId=id; mrView='request'; renderView(); window.scrollTo(0,0); }
 function procureHTML(){
   if(mrView==='request' && curMR()) return mrWorkspace();
-  const tab=(v,l)=>`<button class="seg-btn ${mrView===v?'on':''}" onclick="goMr('${v}')">${l}</button>`;
+  const tab=(v,l)=>`<button class="seg-btn ${mrView===v?'on':''}" onclick="goMr('${jsid(v)}')">${l}</button>`;
   const head=`<div class="page-top" style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px">
       <div><h1>Procurement</h1><p>Material requests, approvals, purchase orders &amp; goods receipt — one centralized queue.</p></div>
       <div style="display:flex;gap:8px;align-items:center"><div class="seg">${tab('queue','Queue')}${tab('requests','All Requests')}${tab('pos','Purchase Orders')}</div>
@@ -70,7 +70,7 @@ function mrQueue(){
   const inDelivery=rs.filter(r=>['PO Raised','Partially Delivered'].includes(r.status));
   const overdueReqs=rs.filter(mrOverdue);
   const kpi=(v,l,cls?)=>`<div class="kpi"><div class="kmid"><div class="kv" ${cls?`style="color:${cls}"`:''}>${v}</div><div class="kl">${l}</div></div></div>`;
-  const queueRow=r=>`<tr class="drill ${mrOverdue(r)?'t-cmp':''}" onclick="openMr('${r.id}')">
+  const queueRow=r=>`<tr class="drill ${mrOverdue(r)?'t-cmp':''}" onclick="openMr('${jsid(r.id)}')">
     <td class="c">${esc(r.id)}</td><td><b>${esc(projName(r.projectId))}</b><div class="t-cmp-src">${esc(locName(r.site)||'')} · ${esc(r.requestedBy||'')}</div></td>
     <td class="r">${(r.lines||[]).length} item(s)</td><td>${priTag(r.priority)}</td>
     <td class="${mrOverdue(r)?'t-over':''}">${esc(r.neededBy||'—')}${mrOverdue(r)?' ⚠':''}</td><td>${mrBadge(r.status)}</td></tr>`;
@@ -98,7 +98,7 @@ function mrRequestList(){
   if(q) rs=rs.filter(r=>[r.id,projName(r.projectId),r.requestedBy].some(x=>String(x||'').toLowerCase().includes(q)));
   rs.sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   const opts=['all',...MR_STATUSES].map(s=>`<option value="${s}" ${mrStatusF===s?'selected':''}>${s==='all'?'All statuses':s}</option>`).join('');
-  const rows=rs.map(r=>`<tr class="drill" onclick="openMr('${r.id}')">
+  const rows=rs.map(r=>`<tr class="drill" onclick="openMr('${jsid(r.id)}')">
     <td class="c">${esc(r.id)}</td><td><b>${esc(projName(r.projectId))}</b></td><td>${esc(locName(r.site)||'—')}</td><td>${esc(r.requestedBy||'—')}</td>
     <td>${esc(r.date||'')}</td><td class="${mrOverdue(r)?'t-over':''}">${esc(r.neededBy||'—')}${mrOverdue(r)?' ⚠':''}</td><td>${priTag(r.priority)}</td>
     <td class="r">${(r.lines||[]).length}</td><td>${mrBadge(r.status)}</td></tr>`).join('')
@@ -119,13 +119,13 @@ function poOrdered(po){ return (po.lines||[]).reduce((s,l)=>s+(+l.qty||0),0); }
 function mrPOList(){
   const pos=MR.pos.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   const rows=pos.map(po=>{ const pct=poOrdered(po)?Math.round(poRecd(po)/poOrdered(po)*100):0; const v=vendor(po.vendorId);
-    return `<tr class="drill" onclick="openMr('${po.mrId}')">
+    return `<tr class="drill" onclick="openMr('${jsid(po.mrId)}')">
       <td class="c">${esc(po.id)}</td><td><b>${esc(v?v.name:po.vendorId)}</b></td><td>${esc(po.mrId||'—')}</td>
       <td class="r">${jcMoney((po.lines||[]).reduce((s,l)=>s+(+l.qty||0)*(+l.rate||0),0))}</td>
       <td class="${poOverdue(po)?'t-over':''}">${esc(po.expectedDate||'—')}${poOverdue(po)?' ⚠':''}</td>
       <td><div class="mr-bar"><span style="width:${pct}%"></span></div><div class="t-cmp-src">${pct}% received</div></td>
       <td>${mrBadge(po.status==='Open'?'PO Raised':po.status==='Partially Received'?'Partially Delivered':po.status==='Received'?'Delivered':po.status)}</td>
-      <td><div class="jc-row-acts">${['Received','Cancelled'].includes(po.status)?'':`<button title="Receive goods" onclick="event.stopPropagation();openReceive('${po.id}')">${svg(IC.in)}</button>`}</div></td></tr>`; }).join('')
+      <td><div class="jc-row-acts">${['Received','Cancelled'].includes(po.status)?'':`<button title="Receive goods" onclick="event.stopPropagation();openReceive('${jsid(po.id)}')">${svg(IC.in)}</button>`}</div></td></tr>`; }).join('')
     ||`<tr class="empty-row"><td colspan="8">No purchase orders yet.</td></tr>`;
   return `<div class="panel" style="margin-top:4px"><div class="inv-head"><h2>Purchase Orders</h2><span class="tag" style="margin-left:auto">${pos.length}</span></div>
     <div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>PO</th><th>Vendor</th><th>Against</th><th class="r">Value</th><th>Expected</th><th>Delivery</th><th>Status</th><th></th></tr></thead>
@@ -135,6 +135,15 @@ function mrPOList(){
 
 /* ============================================================ new request (site engineer) ============================================================ */
 let mrNewLines=[];
+/** Open the New Material Request modal pre-filled with reorder lines from the Action Center. */
+function openReorderRequest(lines){
+  openNewRequest();
+  mrNewLines=(lines&&lines.length)?lines.map(l=>({code:l.code,qty:l.qty,note:l.note||''})):[{code:'',qty:'',note:''}];
+  renderNrLines();
+  const notes=document.getElementById('nr-notes') as HTMLInputElement|null;
+  if(notes) notes.value='Auto reorder from Action Center — stock at/below reorder level';
+  if(typeof toast==='function') toast(mrNewLines.length+' low-stock item(s) added — pick a project and submit');
+}
 function openNewRequest(){
   mrNewLines=[{code:'',qty:'',note:''}];
   openModal(`<div class="modal wide">${mh('',IC.consume,'New Material Request','Raise a request against a project — goes to the purchase queue')}
@@ -191,16 +200,16 @@ function mrWorkspace(){
   const poRows=pos.map(po=>{ const v=vendor(po.vendorId); const pct=poOrdered(po)?Math.round(poRecd(po)/poOrdered(po)*100):0;
     return `<tr><td class="c">${esc(po.id)}</td><td>${esc(v?v.name:po.vendorId)}</td><td class="r">${jcMoney((po.lines||[]).reduce((s,l)=>s+(+l.qty||0)*(+l.rate||0),0))}</td>
       <td class="${poOverdue(po)?'t-over':''}">${esc(po.expectedDate||'—')}</td><td><div class="mr-bar"><span style="width:${pct}%"></span></div></td><td>${mrBadge(po.status==='Open'?'PO Raised':po.status==='Partially Received'?'Partially Delivered':po.status==='Received'?'Delivered':po.status)}</td>
-      <td><div class="jc-row-acts">${['Received','Cancelled'].includes(po.status)?'':`<button title="Receive goods" onclick="openReceive('${po.id}')">${svg(IC.in)}</button><button title="Cancel PO" onclick="cancelPO('${po.id}')">${svg(IC.x)}</button>`}</div></td></tr>`; }).join('')
+      <td><div class="jc-row-acts">${['Received','Cancelled'].includes(po.status)?'':`<button title="Receive goods" onclick="openReceive('${jsid(po.id)}')">${svg(IC.in)}</button><button title="Cancel PO" onclick="cancelPO('${jsid(po.id)}')">${svg(IC.x)}</button>`}</div></td></tr>`; }).join('')
     ||`<tr class="empty-row"><td colspan="7">No purchase orders raised yet.</td></tr>`;
   const quoteRows=(r.quotes||[]).map(q=>`<tr class="${q.selected?'t-sel':''}"><td>${esc(itemName(q.code))}</td><td><b>${esc(vendor(q.vendorId)?vendor(q.vendorId).name:q.vendorId)}</b></td><td class="r b">${jcMoney(q.rate)}</td><td>${esc(q.validity||'—')}</td>
-    <td><div class="jc-row-acts">${q.selected?'<span class="t-pick">Selected</span>':`<button title="Select" onclick="selectMrQuote('${r.id}','${q.id}')">${svg(IC.check)}</button>`}<button title="Remove" onclick="delMrQuote('${r.id}','${q.id}')">${svg(IC.trash)}</button></div></td></tr>`).join('')
+    <td><div class="jc-row-acts">${q.selected?'<span class="t-pick">Selected</span>':`<button title="Select" onclick="selectMrQuote('${jsid(r.id)}','${jsid(q.id)}')">${svg(IC.check)}</button>`}<button title="Remove" onclick="delMrQuote('${jsid(r.id)}','${jsid(q.id)}')">${svg(IC.trash)}</button></div></td></tr>`).join('')
     ||`<tr class="empty-row"><td colspan="5">No quotes recorded. Add vendor quotes to compare before approving.</td></tr>`;
   const actions=`<div style="display:flex;gap:8px;flex-wrap:wrap">
-    ${canReview?`<button class="btn ghost" onclick="setMrStatus('${r.id}','Under Review','Picked up for review')">${svg(IC.flag)} Start review</button>`:''}
-    ${canApprove?`<button class="btn" onclick="openApprove('${r.id}')">${svg(IC.check)} Approve</button><button class="btn danger" onclick="rejectMr('${r.id}')">${svg(IC.x)} Reject</button>`:''}
-    ${canPO?`<button class="btn" style="background:var(--green)" onclick="openRaisePO('${r.id}')">${svg(IC.po)} Raise PO</button>`:''}
-    ${canCancel?`<button class="btn ghost" onclick="cancelMr('${r.id}')">Cancel request</button>`:''}</div>`;
+    ${canReview?`<button class="btn ghost" onclick="setMrStatus('${jsid(r.id)}','Under Review','Picked up for review')">${svg(IC.flag)} Start review</button>`:''}
+    ${canApprove?`<button class="btn" onclick="openApprove('${jsid(r.id)}')">${svg(IC.check)} Approve</button><button class="btn danger" onclick="rejectMr('${jsid(r.id)}')">${svg(IC.x)} Reject</button>`:''}
+    ${canPO?`<button class="btn" style="background:var(--green)" onclick="openRaisePO('${jsid(r.id)}')">${svg(IC.po)} Raise PO</button>`:''}
+    ${canCancel?`<button class="btn ghost" onclick="cancelMr('${jsid(r.id)}')">Cancel request</button>`:''}</div>`;
   return `
   <div class="t-ws-top">
     <button class="t-back" onclick="goMr('queue')">${svg(IC.drill)} Queue</button>
@@ -214,7 +223,7 @@ function mrWorkspace(){
   <div class="t-ov-grid" style="margin-top:16px">
     <div class="panel"><div class="inv-head"><h2>Requested items</h2></div>
       <div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>Item</th><th>Unit</th><th class="r">Req</th><th class="r">Appr</th><th class="r">Ordered</th><th class="r">Recd</th><th>Line</th></tr></thead><tbody>${lineRows}</tbody></table></div></div>
-    <div class="panel"><div class="inv-head"><h2>Vendor quotation comparison</h2>${['Delivered','Closed','Cancelled','Rejected'].includes(r.status)?'':`<button class="btn sm" style="margin-left:auto" onclick="openMrQuote('${r.id}')">${svg(IC.plus)} Add quote</button>`}</div>
+    <div class="panel"><div class="inv-head"><h2>Vendor quotation comparison</h2>${['Delivered','Closed','Cancelled','Rejected'].includes(r.status)?'':`<button class="btn sm" style="margin-left:auto" onclick="openMrQuote('${jsid(r.id)}')">${svg(IC.plus)} Add quote</button>`}</div>
       <div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>Item</th><th>Vendor</th><th class="r">Rate</th><th>Validity</th><th></th></tr></thead><tbody>${quoteRows}</tbody></table></div>
       <div class="jc-hint" style="padding:12px 20px">${svg(IC.vendors)} Add quotes per item and select the best — the selected rate pre-fills the PO.</div></div>
   </div>
@@ -246,7 +255,7 @@ function openApprove(id){ const r=MR.requests.find(x=>x.id===id);
     <tbody>${(r.lines||[]).map(l=>`<tr><td><b>${esc(l.desc)}</b><div class="t-cmp-src">${esc(l.code)}</div></td><td>${esc(l.unit||'')}</td><td class="r">${jcNum(l.qty)}</td>
       <td class="r"><input class="f" style="width:90px;text-align:right" id="ap-${l.id}" type="number" min="0" value="${l.approvedQty!=null?l.approvedQty:l.qty}"></td></tr>`).join('')}</tbody></table></div>
       <div class="hint">${svg(IC.jobcost)}<div>Set a quantity to 0 to reject that line. Approving moves the request to “Approved”, ready to raise a PO.</div></div></div>
-    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitApprove('${id}')">Approve request</button></div></div>`);
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitApprove('${jsid(id)}')">Approve request</button></div></div>`);
 }
 function submitApprove(id){ const r=MR.requests.find(x=>x.id===id);
   (r.lines||[]).forEach(l=>{ const v=(document.getElementById('ap-'+l.id) as HTMLInputElement); l.approvedQty=v?Math.max(0,parseFloat(v.value)||0):(+l.qty||0); });
@@ -264,7 +273,7 @@ function openMrQuote(id){ const r=MR.requests.find(x=>x.id===id);
       <div class="fld"><label>Quoted rate (₹) <span class="req">*</span></label><input class="f" id="mq-rate" type="number" step="any"></div>
       <div class="fld"><label>Validity</label><input class="f" id="mq-valid" placeholder="e.g. 15 days"></div>
     </div></div>
-    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitMrQuote('${id}')">Save quote</button></div></div>`);
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitMrQuote('${jsid(id)}')">Save quote</button></div></div>`);
 }
 function submitMrQuote(id){ const r=MR.requests.find(x=>x.id===id); const rate=parseFloat(val('mq-rate'))||0; if(rate<=0) return toast('Enter a rate');
   let m=0; (r.quotes||[]).forEach(q=>{ const g=((q.id||'').match(/(\d+)$/)||[])[1]; if(g&&+g>m)m=+g; });
@@ -291,7 +300,7 @@ function openRaisePO(id){ const r=MR.requests.find(x=>x.id===id);
       <td class="r"><input class="f" style="width:80px;text-align:right" id="rpq-${l.id}" type="number" min="0" value="${pendQty}"></td>
       <td class="r"><input class="f" style="width:90px;text-align:right" id="rpr-${l.id}" type="number" step="any" value="${selRate(l.code)}"></td></tr>`; }).join('')}</tbody></table></div>
     <div class="hint">${svg(IC.po)}<div>Order quantities default to the pending approved amount; rates pre-fill from the selected quote. You can raise multiple POs (e.g. split across vendors).</div></div></div>
-    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitRaisePO('${id}')">Create PO</button></div></div>`);
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitRaisePO('${jsid(id)}')">Create PO</button></div></div>`);
 }
 function submitRaisePO(id){ const r=MR.requests.find(x=>x.id===id); const exp=val('rp-exp'); if(!exp) return toast('Set an expected delivery date');
   const lines=[]; (r.lines||[]).forEach(l=>{ const qi=(document.getElementById('rpq-'+l.id) as HTMLInputElement); if(!qi) return; const qty=parseFloat(qi.value)||0; const rate=parseFloat((document.getElementById('rpr-'+l.id) as HTMLInputElement|null)?.value)||0;
@@ -315,7 +324,7 @@ function openReceive(poId){ const po=MR.pos.find(p=>p.id===poId); if(!po) return
     <tbody>${po.lines.map((l,i)=>{ const pend=(+l.qty||0)-(+l.recdQty||0); return `<tr><td><b>${esc(l.desc)}</b><div class="t-cmp-src">${esc(l.code)}</div></td><td>${esc(l.unit||'')}</td><td class="r">${jcNum(l.qty)}</td><td class="r">${jcNum(l.recdQty||0)}</td>
       <td class="r"><input class="f" style="width:90px;text-align:right" id="grq-${i}" type="number" min="0" max="${pend}" value="${pend}"></td></tr>`; }).join('')}</tbody></table></div>
     <div class="hint">${svg(IC.in)}<div>Enter a smaller quantity for a <b>partial delivery</b> — the PO stays open for the balance. Each receipt posts a Stock-In movement.</div></div></div>
-    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitReceive('${poId}')">Receive goods</button></div></div>`);
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitReceive('${jsid(poId)}')">Receive goods</button></div></div>`);
 }
 function submitReceive(poId){ const po=MR.pos.find(p=>p.id===poId); if(!po) return; const loc=val('gr-loc')||po.deliverTo||'WH-MAIN'; const v=vendor(po.vendorId);
   const grn=val('gr-no')||('GRN-'+po.id); const dt=val('gr-date')||nowDate(); const recLines=[]; let any=false;
@@ -357,10 +366,21 @@ function mrSeed(){
   const r4={ id:'MR-004', projectId:p('MC041').id, site:'ST-ASHOK', requestedBy:'R. Vel', date:d(-12), neededBy:d(-2), priority:'Urgent', status:'Partially Delivered',
     lines:[L('CEM-001',300,300,300,180),L('SFT-001',50,50,50,50)], quotes:[], notes:'Foundation pour', history:[{at:new Date(Date.now()-12*864e5).toISOString(),by:'R. Vel',from:'',to:'Submitted',note:'Raised'},{at:new Date(Date.now()-10*864e5).toISOString(),by:COMPANY.user,from:'Approved',to:'PO Raised',note:'PO-001 raised'},{at:new Date(Date.now()-3*864e5).toISOString(),by:COMPANY.user,from:'PO Raised',to:'Partially Delivered',note:'Partial GRN'}], poIds:['PO-001'] };
   reqs.push(r4);
+  // MR-005: a PO raised example for MC 047
+  const r5={ id:'MR-005', projectId:p('MC047').id, site:'ST-SASTRA', requestedBy:'S. Ramesh', date:d(-9), neededBy:d(-1), priority:'Urgent', status:'PO Raised',
+    lines:[L('STL-012',2200,2200,2200,0),L('CEM-001',450,450,450,0)], quotes:[], notes:'Villa block — RCC pour', history:[{at:new Date(Date.now()-9*864e5).toISOString(),by:'S. Ramesh',from:'',to:'Submitted',note:'Raised'},{at:new Date(Date.now()-7*864e5).toISOString(),by:COMPANY.user,from:'Approved',to:'PO Raised',note:'PO-002 raised'}], poIds:['PO-002'] };
+  reqs.push(r5);
+  // MR-006: awaiting review, no PO yet, for MC 052
+  const r6={ id:'MR-006', projectId:p('MC052').id, site:'ST-HEBBAL', requestedBy:'R. Suresh', date:d(-2), neededBy:d(6), priority:'Normal', status:'Submitted',
+    lines:[L('BLK-006',3000,null)], quotes:[], notes:'Warehouse block work', history:[{at:new Date(Date.now()-2*864e5).toISOString(),by:'R. Suresh',from:'',to:'Submitted',note:'Request raised'}], poIds:[] };
+  reqs.push(r6);
   const pos=[
     { id:'PO-001', mrId:'MR-004', vendorId:'V-01', date:d(-10), expectedDate:d(-2), deliverTo:'ST-ASHOK', status:'Partially Received',
       lines:[{code:'CEM-001',desc:'OPC 53 Cement',unit:'bag',qty:300,rate:418,recdQty:180},{code:'SFT-001',desc:'Safety helmet',unit:'nos',qty:50,rate:240,recdQty:50}],
       receipts:[{at:new Date(Date.now()-3*864e5).toISOString(),by:COMPANY.user,grnNo:'GRN-1007',date:d(-3),lines:[{code:'CEM-001',qty:180},{code:'SFT-001',qty:50}]}] },
+    { id:'PO-002', mrId:'MR-005', vendorId:'V-02', date:d(-7), expectedDate:d(2), deliverTo:'ST-SASTRA', status:'Open',
+      lines:[{code:'STL-012',desc:'TMT Bar 12 mm',unit:'kg',qty:2200,rate:66,recdQty:0},{code:'CEM-001',desc:'OPC 53 Cement',unit:'bag',qty:450,rate:415,recdQty:0}],
+      receipts:[] },
   ];
   return { requests:reqs, pos, audit:[] };
 }

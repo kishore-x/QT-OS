@@ -31,6 +31,7 @@ const IC = {
   check:'<path d="M20 6 9 17l-5-5"/>', x:'<path d="M18 6 6 18M6 6l12 12"/>', edit:'<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
   trash:'<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>',
   logo:'<path d="M12 2 2 8l10 6 10-6-10-6z" fill="#2563eb" stroke="none"/><path d="M2 8l10 6 10-6" stroke="#93b4fb"/><path d="M12 2v12" stroke="#1e3a8a"/><path d="m7 5 10 6" stroke="#dbe6ff"/>',
+  action:'<path d="M12 2a7 7 0 0 0-7 7c0 5-3 7-3 7h20s-3-2-3-7a7 7 0 0 0-7-7z"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/><circle cx="18" cy="6" r="3" fill="#ef4444" stroke="none"/>',
 };
 
 /* ---------- state ---------- */
@@ -42,6 +43,9 @@ function resetData(){ state=clone(SEED); save(); }
 let state: InventoryState = load();
 
 const item=c=>state.items.find(i=>i.code===c);
+/* safe label helpers — never throw if an item was removed (e.g. by another user) */
+const itemLabel=c=>{ const i=item(c); return i?i.name:c; };
+const itemUnit=c=>{ const i=item(c); return i?i.unit:''; };
 const loc=id=>state.locations.find(l=>l.id===id);
 const vendor=id=>state.vendors.find(v=>v.id===id);
 const locName=id=>({OPENING:'Opening',VENDOR:'Vendor',CONSUMED:'Consumed',OUT:'Issued out',TRANSIT:'In transit'}[id]) || (loc(id)?loc(id).name:id);
@@ -66,7 +70,7 @@ function nowDate(){ return new Date().toISOString().slice(0,10); }
 function nowTime(){ const d=new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 function nextId(prefix,arrKey,field?){ let max=0; (state[arrKey]||[]).forEach(x=>{ const m=((x[field||'id'])||'').match(/(\d+)\s*$/); if(m){ const n=+m[1]; if(n>max)max=n; } }); return prefix+(max+1); }
 function addMovement(mv){ mv.id=mv.id||('MV-'+(1000+state.movements.length+1)); mv.date=mv.date||nowDate(); mv.time=mv.time||nowTime(); state.movements.push(mv); }
-function toast(msg){ const t=document.getElementById('toast'); t.innerHTML=svg(IC.check)+'<span>'+msg+'</span>'; t.classList.add('on'); clearTimeout(window._tt); window._tt=setTimeout(()=>t.classList.remove('on'),2600); }
+function toast(msg){ const t=document.getElementById('toast'); if(!t) return; t.innerHTML=svg(IC.check)+'<span>'+msg+'</span>'; t.classList.add('on'); clearTimeout(window._tt); window._tt=setTimeout(()=>t.classList.remove('on'),2600); }
 
 /* ---------- view state ---------- */
 let view='dashboard', curLoc='WH-MAIN', curTab='material', qFilter='', catFilter='all', statusFilter='all', page=1, sortKey='', sortDir=1;
@@ -92,37 +96,70 @@ const TYPE_OF_TAB={material:'material',container:'container',equipment:'equipmen
 
 /* ---------- shell ---------- */
 function renderSidebar(){
-  const nav=[['dashboard','Dashboard'],['tracking','Tracking'],['tenders','Bidding'],['projects','Projects'],['procurement','Procurement'],['inventory','Inventory'],['jobcost','Job Costs'],['billing','Connected Documents'],['vendors','Vendors'],['reports','Reports'],['settings','Settings']];
+  const nav=[['dashboard','Dashboard'],['action','Action Center'],['tracking','Tracking'],['tenders','Bidding'],['projects','Projects'],['procurement','Procurement'],['inventory','Inventory'],['jobcost','Job Costs'],['billing','Connected Documents'],['vendors','Vendors'],['reports','Reports'],['settings','Settings']];
+  const ac=alertCount();
   document.getElementById('sidebar').innerHTML=`
     <div class="logo">${svg(IC.logo,36)}<b>Qualtech<br>Engineers Pvt. Ltd.</b></div>
-    <nav class="nav">${nav.map(n=>`<button class="nav-item ${view===n[0]?'active':''}" onclick="go('${n[0]}')">${svg(IC[n[0]]||IC.dashboard)} ${n[1]}</button>`).join('')}</nav>`;
+    <nav class="nav">${nav.map(n=>`<button class="nav-item ${view===n[0]?'active':''}" onclick="go('${n[0]}')">${svg(IC[n[0]]||IC.dashboard)} ${n[1]}${n[0]==='action'&&ac?`<span class="nav-badge">${ac>99?'99+':ac}</span>`:''}</button>`).join('')}</nav>`;
 }
 function renderTopbar(){
   document.getElementById('topbar').innerHTML=`
     <div class="search">${svg(IC.search)}<input id="topSearch" placeholder="Search material, item code, or location…" value="${esc(qFilter)}" oninput="topSearch(this.value)"></div>
     <div class="tb-right">
       <button class="bell" title="Toggle light / dark" onclick="toggleTheme()">${svg(document.documentElement.getAttribute('data-theme')==='dark'?ICsun:ICmoon)}</button>
-      <button class="bell" title="Notifications"><span class="dot"></span>${svg(IC.bell)}</button>
+      <button class="bell" title="Action Center" onclick="go('action')">${(()=>{const c=alertCount();return c?`<span class="bell-count">${c>99?'99+':c}</span>`:'';})()}${svg(IC.bell)}</button>
       <div class="user"><div class="avatar">RS</div><div class="u"><b>${COMPANY.user}</b><span>${COMPANY.role}</span></div>${svg(IC.chev)}</div>
     </div>`;
 }
 function go(v){ view=v; page=1; renderSidebar(); renderView(); window.scrollTo(0,0); }
-function topSearch(v){ qFilter=v; page=1; if(view!=='inventory'){ view='inventory'; renderSidebar(); } renderView(); }
-function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+let _topSearchTimer: ReturnType<typeof setTimeout> | null = null;
+function topSearch(v){
+  qFilter=v; page=1;
+  if(view!=='inventory'){ view='inventory'; renderSidebar(); }
+  if(_topSearchTimer) clearTimeout(_topSearchTimer);
+  _topSearchTimer=setTimeout(()=>{ _topSearchTimer=null; renderView(); }, 180);
+}
+function esc(s){ return String(s==null?'':s).replace(/[&<>"'`]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','`':'&#96;'}[c])); }
+/* For an id/code embedded in a JS-string argument of an inline handler
+   (e.g. onclick="fn('${jsid(code)}')"). Codes/ids are always a safe charset,
+   so stripping anything else is lossless for real data and neutralises any
+   quote/bracket injection — even from data written straight to the API. */
+function jsid(s){ return String(s==null?'':s).replace(/[^A-Za-z0-9 _.\/:-]/g,''); }
 
 /* ---------- router ---------- */
 function renderView(){
   const el=document.getElementById('app');
-  if(view==='dashboard'){ el.innerHTML=dashboardHTML(); return; }
-  if(view==='inventory'){ el.innerHTML=inventoryHTML(); bindInv(); return; }
-  if(view==='jobcost'){ el.innerHTML=jobCostHTML(); return; }
-  if(view==='projects'){ el.innerHTML=projectsHTML(); return; }
-  if(view==='tenders'){ el.innerHTML=tenderHTML(); if(typeof bindTender==='function') bindTender(); return; }
-  if(view==='procurement'){ el.innerHTML=procureHTML(); if(typeof bindProcure==='function') bindProcure(); return; }
-  if(view==='billing'){ el.innerHTML=billingHTML(); if(typeof billBind==='function') billBind(); return; }
-  if(view==='reports'){ el.innerHTML=reportsHTML(); return; }
-  if(view==='vendors'){ el.innerHTML=vendorsHTML(); return; }
-  el.innerHTML=placeholderHTML(view);
+  if(!el) return;
+  try{
+    if(view==='dashboard'){ el.innerHTML=dashboardHTML(); return; }
+    if(view==='action'){ el.innerHTML=actionCenterHTML(); return; }
+    if(view==='inventory'){ el.innerHTML=inventoryHTML(); bindInv(); return; }
+    if(view==='jobcost'){ el.innerHTML=jobCostHTML(); return; }
+    if(view==='projects'){ el.innerHTML=projectsHTML(); return; }
+    if(view==='tenders'){ el.innerHTML=tenderHTML(); if(typeof bindTender==='function') bindTender(); return; }
+    if(view==='procurement'){ el.innerHTML=procureHTML(); if(typeof bindProcure==='function') bindProcure(); return; }
+    if(view==='billing'){ el.innerHTML=billingHTML(); if(typeof billBind==='function') billBind(); return; }
+    if(view==='reports'){ el.innerHTML=reportsHTML(); return; }
+    if(view==='vendors'){ el.innerHTML=vendorsHTML(); return; }
+    el.innerHTML=placeholderHTML(view);
+  }catch(err){
+    console.error('renderView failed for "'+view+'":', err);
+    el.innerHTML=renderErrorHTML(view, err);
+  }
+}
+function renderErrorHTML(where, err){
+  const msg=esc((err&&err.message)||String(err||'Unknown error'));
+  return `<div class="page-top"><h1>Something went wrong</h1><p>This screen hit an unexpected error, but your data is safe — nothing was lost.</p></div>
+  <div class="panel" style="padding:28px;text-align:center">
+    <div style="font-size:40px;line-height:1;margin-bottom:12px">⚠️</div>
+    <div style="font-weight:600;margin-bottom:6px">Couldn't display “${esc(where)}”.</div>
+    <div style="color:var(--muted);font-size:13px;max-width:520px;margin:0 auto 18px">${msg}</div>
+    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+      <button class="btn" onclick="go('dashboard')">Go to Dashboard</button>
+      <button class="btn ghost" onclick="renderView()">Try again</button>
+      <button class="btn ghost" onclick="location.reload()">Reload app</button>
+    </div>
+  </div>`;
 }
 
 /* ---------- INVENTORY ---------- */
@@ -238,7 +275,19 @@ function inventoryHTML(){
 }
 function selLoc(id){ curLoc=id; page=1; renderView(); }
 function selTab(t){ curTab=t; page=1; renderView(); }
-function invSearch(v){ qFilter=v; page=1; const f=document.getElementById('invSearch'); renderView(); const f2=(document.getElementById('invSearch') as HTMLInputElement); if(f2){ f2.focus(); f2.setSelectionRange(v.length,v.length);} }
+let _invSearchTimer: ReturnType<typeof setTimeout> | null = null;
+function invSearch(v){
+  qFilter=v; page=1;
+  // Re-rendering the whole table on every keystroke lags on large catalogues.
+  // Debounce the re-render; the input stays responsive because it isn't replaced between keystrokes.
+  if(_invSearchTimer) clearTimeout(_invSearchTimer);
+  _invSearchTimer=setTimeout(()=>{
+    _invSearchTimer=null;
+    renderView();
+    const f2=(document.getElementById('invSearch') as HTMLInputElement);
+    if(f2){ f2.focus(); f2.setSelectionRange(f2.value.length,f2.value.length); }
+  }, 180);
+}
 function pg(n){ page=n; renderView(); }
 function bindInv(){ /* re-focus handled in invSearch */ }
 
@@ -331,15 +380,16 @@ function rowMenu(e,code){
   e.stopPropagation(); closeMenus();
   const wrap=e.target.closest('.row-menu');
   const m=document.createElement('div'); m.className='menu';
+  const c=jsid(code);
   m.innerHTML=`
-    <button onclick="openStockIn('${code}')">${svg(IC.in)} Stock In</button>
-    <button onclick="openStockOut('${code}')">${svg(IC.out)} Stock Out</button>
-    <button onclick="openTransfer('${code}')">${svg(IC.xfer)} Transfer</button>
-    <button onclick="openReserve('${code}')">${svg(IC.reserve)} Reserve</button>
-    <button onclick="openConsume('${code}')">${svg(IC.consume)} Consume</button>
-    <button onclick="openHistory('${code}')">${svg(IC.history)} Movements</button>
-    <button onclick="openEditItem('${code}')">${svg(IC.edit)} Edit item</button>
-    <button class="del" onclick="delItem('${code}')">${svg(IC.trash)} Delete item</button>`;
+    <button onclick="openStockIn('${c}')">${svg(IC.in)} Stock In</button>
+    <button onclick="openStockOut('${c}')">${svg(IC.out)} Stock Out</button>
+    <button onclick="openTransfer('${c}')">${svg(IC.xfer)} Transfer</button>
+    <button onclick="openReserve('${c}')">${svg(IC.reserve)} Reserve</button>
+    <button onclick="openConsume('${c}')">${svg(IC.consume)} Consume</button>
+    <button onclick="openHistory('${c}')">${svg(IC.history)} Movements</button>
+    <button onclick="openEditItem('${c}')">${svg(IC.edit)} Edit item</button>
+    <button class="del" onclick="delItem('${c}')">${svg(IC.trash)} Delete item</button>`;
   wrap.appendChild(m);
 }
 function closeMenus(){ document.querySelectorAll('.menu').forEach(m=>m.remove()); }
@@ -371,7 +421,7 @@ function openStockIn(code){
 function submitStockIn(){
   const code=val('si-code'), qty=numVal('si-qty'); if(!code||qty<=0) return toast('Enter a valid quantity');
   addMovement({code,qty,from:'VENDOR',to:val('si-loc'),type:'IN',ref:val('si-ref')||'Stock in',person:val('si-person')||COMPANY.user,date:val('si-date')});
-  save(); closeModal(); renderView(); toast(num(qty)+' '+item(code).unit+' of '+item(code).name+' added');
+  save(); closeModal(); renderView(); toast(num(qty)+' '+itemUnit(code)+' of '+itemLabel(code)+' added');
 }
 
 /* ---------- Stock Out ---------- */
@@ -389,12 +439,12 @@ function openStockOut(code){
     <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn danger" onclick="submitStockOut()">Record Stock Out</button></div></div>`);
   soAvail();
 }
-function soAvail(){ const c=val('so-code'), l=val('so-loc'); const e=document.getElementById('so-oh'); if(e&&c&&l) e.textContent=num(onHand(c,l))+' '+item(c).unit; }
+function soAvail(){ const c=val('so-code'), l=val('so-loc'); const e=document.getElementById('so-oh'); if(e&&c&&l) e.textContent=num(onHand(c,l))+' '+itemUnit(c); }
 function submitStockOut(){
   const code=val('so-code'), qty=numVal('so-qty'), l=val('so-loc'); if(!code||qty<=0) return toast('Enter a valid quantity');
   if(qty>onHand(code,l)) return toast('Not enough stock — only '+num(onHand(code,l))+' available');
   addMovement({code,qty,from:l,to:val('so-reason'),type:'OUT',ref:val('so-ref')||'Stock out',person:val('so-person')||COMPANY.user,date:val('so-date')});
-  save(); closeModal(); renderView(); toast(num(qty)+' '+item(code).unit+' of '+item(code).name+' issued');
+  save(); closeModal(); renderView(); toast(num(qty)+' '+itemUnit(code)+' of '+itemLabel(code)+' issued');
 }
 
 /* ---------- Transfer ---------- */
@@ -411,7 +461,7 @@ function openTransfer(code){
     <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitTransfer()">Dispatch Transfer</button></div></div>`);
   trAvail();
 }
-function trAvail(){ const c=val('tr-code'),l=val('tr-from'); const e=document.getElementById('tr-oh'); if(e&&c&&l) e.textContent=num(onHand(c,l))+' '+item(c).unit; }
+function trAvail(){ const c=val('tr-code'),l=val('tr-from'); const e=document.getElementById('tr-oh'); if(e&&c&&l) e.textContent=num(onHand(c,l))+' '+itemUnit(c); }
 function submitTransfer(){
   const code=val('tr-code'), qty=numVal('tr-qty'), from=val('tr-from'), to=val('tr-to');
   if(!code||qty<=0) return toast('Enter a valid quantity');
@@ -419,7 +469,7 @@ function submitTransfer(){
   if(qty>onHand(code,from)) return toast('Not enough stock at source');
   const tid=nextId('TRF-00','movements','transferId');
   addMovement({code,qty,from,to:'TRANSIT',type:'TRANSFER',ref:tid+' → '+locName(to),person:val('tr-person')||'Warehouse',date:val('tr-date'),transferTo:to,transferId:tid,fromLoc:from,received:false});
-  save(); closeModal(); renderView(); toast('Dispatched '+num(qty)+' '+item(code).unit+' — in transit to '+locName(to));
+  save(); closeModal(); renderView(); toast('Dispatched '+num(qty)+' '+itemUnit(code)+' — in transit to '+locName(to));
 }
 
 /* ---------- Reserve ---------- */
@@ -437,13 +487,13 @@ function openReserve(code){
     <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitReserve()">Reserve</button></div></div>`);
   rsAvail();
 }
-function rsAvail(){ const c=val('rs-code'),l=val('rs-loc'); const e=document.getElementById('rs-av'); if(e&&c&&l) e.textContent=num(available(c,l))+' '+item(c).unit; }
+function rsAvail(){ const c=val('rs-code'),l=val('rs-loc'); const e=document.getElementById('rs-av'); if(e&&c&&l) e.textContent=num(available(c,l))+' '+itemUnit(c); }
 function submitReserve(){
   const code=val('rs-code'), qty=numVal('rs-qty'), l=val('rs-loc');
   if(!code||qty<=0) return toast('Enter a valid quantity');
   if(qty>available(code,l)) return toast('Only '+num(available(code,l))+' available to reserve');
   state.reservations.push({id:nextId('RSV-00','reservations'),date:val('rs-date'),code,qty,location:l,project:val('rs-proj'),person:val('rs-person')||COMPANY.user,status:'active',note:val('rs-note')});
-  save(); closeModal(); renderView(); toast('Reserved '+num(qty)+' '+item(code).unit+' for '+locName(val('rs-proj')));
+  save(); closeModal(); renderView(); toast('Reserved '+num(qty)+' '+itemUnit(code)+' for '+locName(val('rs-proj')));
 }
 
 /* ---------- Consume ---------- */
@@ -463,7 +513,7 @@ function openConsume(code){
     <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitConsume()">Record Consumption</button></div></div>`);
   csAvail();
 }
-function csAvail(){ const c=val('cs-code'),l=val('cs-loc'); const e=document.getElementById('cs-oh'); if(e&&c&&l) e.textContent=num(onHand(c,l))+' '+item(c).unit; }
+function csAvail(){ const c=val('cs-code'),l=val('cs-loc'); const e=document.getElementById('cs-oh'); if(e&&c&&l) e.textContent=num(onHand(c,l))+' '+itemUnit(c); }
 function submitConsume(){
   const code=val('cs-code'), qty=numVal('cs-qty'), l=val('cs-loc');
   if(!code||qty<=0) return toast('Enter a valid quantity');
@@ -479,7 +529,7 @@ function submitConsume(){
     jcr.entries.push({ id:jcNextId('CE-',jcr.entries), projectId:jcPid, category:'Materials', date:dt||nowDate(), billNo:'', desc:it.name+' — consumed', code:costCode, head:it.category, unit:it.unit, qty, rate:it.rate||0, amount:amt, source:'Inventory consumption ('+code+')', createdBy:val('cs-person')||'Site Engineer', createdAt:new Date().toISOString() });
     jcAudit('consume→cost', code+' ₹'+Math.round(amt)+' → '+costCode+' ['+jcPid+']'); jcSave();
   }
-  save(); closeModal(); renderView(); toast('Consumed '+num(qty)+' '+item(code).unit+' of '+item(code).name+(costCode?' · posted to Job Cost '+costCode:''));
+  save(); closeModal(); renderView(); toast('Consumed '+num(qty)+' '+itemUnit(code)+' of '+itemLabel(code)+(costCode?' · posted to Job Cost '+costCode:''));
 }
 
 /* ---------- Add / Edit item ---------- */
@@ -489,20 +539,23 @@ function itemForm(it){
   const types=[['material','Material'],['container','Container'],['equipment','Equipment']];
   openModal(`<div class="modal">${mh('',IC.inventory,it?'Edit Item':'Add Item',it?'Update the item master record':'Create a new item master record')}
     <div class="m-body"><div class="grid2">
-      <div class="fld"><label>Item code <span class="req">*</span></label><input class="f" id="it-code" value="${it?it.code:''}" ${it?'readonly':''} placeholder="e.g. CEM-003"></div>
+      <div class="fld"><label>Item code <span class="req">*</span></label><input class="f" id="it-code" value="${it?esc(it.code):''}" ${it?'readonly':''} placeholder="e.g. CEM-003"></div>
       <div class="fld"><label>Type</label><select class="f" id="it-type">${types.map(t=>`<option value="${t[0]}" ${it&&it.type===t[0]?'selected':''}>${t[1]}</option>`).join('')}</select></div>
       <div class="fld col2"><label>Name <span class="req">*</span></label><input class="f" id="it-name" value="${it?esc(it.name):''}" placeholder="Material / equipment name"></div>
       <div class="fld"><label>Category</label><select class="f" id="it-cat">${CATEGORIES.map(c=>`<option ${it&&it.category===c?'selected':''}>${c}</option>`).join('')}</select></div>
-      <div class="fld"><label>Unit</label><input class="f" id="it-unit" value="${it?it.unit:''}" placeholder="bag, kg, nos…"></div>
+      <div class="fld"><label>Unit</label><input class="f" id="it-unit" value="${it?esc(it.unit):''}" placeholder="bag, kg, nos…"></div>
       <div class="fld"><label>Rate (₹)</label><input class="f" id="it-rate" type="number" min="0" value="${it?it.rate:''}"></div>
       <div class="fld"><label>Reorder level</label><input class="f" id="it-reorder" type="number" min="0" value="${it?it.reorder:''}"></div>
       ${it?'':`<div class="fld"><label>Opening qty</label><input class="f" id="it-open" type="number" min="0" placeholder="0"></div>
       <div class="fld"><label>At location</label><select class="f" id="it-oploc">${locOptions(curLoc)}</select></div>`}
     </div></div>
-    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitItem(${it?`'${it.code}'`:'null'})">${it?'Save changes':'Add item'}</button></div></div>`);
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitItem(${it?`'${jsid(it.code)}'`:'null'})">${it?'Save changes':'Add item'}</button></div></div>`);
 }
+/** Codes/ids are embedded in inline handlers, so restrict them to a safe charset at entry. */
+const CODE_RE=/^[A-Za-z0-9 _.\/-]+$/;
 function submitItem(editing){
   const code=val('it-code'), name=val('it-name'); if(!code||!name) return toast('Code and name are required');
+  if(!editing && !CODE_RE.test(code)) return toast('Item code can use letters, numbers, spaces and . _ - / only');
   if(!editing && item(code)) return toast('That item code already exists');
   const rec={code,name,category:val('it-cat'),unit:val('it-unit')||'nos',rate:numVal('it-rate'),reorder:numVal('it-reorder'),type:val('it-type')};
   if(editing){ Object.assign(item(editing),rec); toast('Item updated'); }
@@ -586,7 +639,7 @@ function openHistory(code){
       <td style="color:var(--muted)">${esc(m.ref||'')}</td><td style="color:var(--muted)">${esc(m.person||'')}</td></tr>`; }).join('')
       || '<tr class="empty-row"><td colspan="8">No movements found.</td></tr>';
   };
-  openModal(`<div class="modal wide">${mh('',IC.history,'Movement History',(code?item(code).name+' — ':'')+'complete audit trail of every stock change')}
+  openModal(`<div class="modal wide">${mh('',IC.history,'Movement History',(code?itemLabel(code)+' — ':'')+'complete audit trail of every stock change')}
     <div class="m-body" style="padding-top:10px">
       <div class="f-search" style="margin-bottom:12px">${svg(IC.search)}<input class="f" id="hist-q" placeholder="Search item, reference, location, type…" oninput="document.getElementById('hist-body').innerHTML=window._histRender(this.value)" style="padding-left:36px"></div>
       <div style="max-height:52vh;overflow:auto"><table class="mv-table"><thead><tr><th>When</th><th>Code</th><th>Material</th><th class="r">Qty</th><th>Movement</th><th>Type</th><th>Reference</th><th>By</th></tr></thead><tbody id="hist-body">${render('')}</tbody></table></div>
@@ -595,24 +648,707 @@ function openHistory(code){
 }
 
 /* ---------- Reports / Vendors / placeholder ---------- */
+/* ============================================================
+   REPORTS & ANALYSIS — sales, procurement, projects, inventory.
+   Every figure is computed live from the stores; each tab exports CSV.
+   ============================================================ */
+let repTab='monthly';
+let repMonth='';   // '' → latest month with activity
+let repRange=6;    // trends window, in months
+function setRepRange(n){ repRange=n; renderView(); }
+/** round a max up to a clean 1/2/5 × 10^k gridline value */
+function niceMax(v){ if(v<=0) return 1; const p=Math.pow(10,Math.floor(Math.log10(v))); const r=v/p; const m=r<=1?1:r<=2?2:r<=5?5:10; return m*p; }
+/** short money for chart axes: ₹x.x Cr / ₹x.x L / ₹n */
+function fmtShort(n){ n=Math.round(n); if(Math.abs(n)>=1e7) return '₹'+(n/1e7).toFixed(1)+'Cr'; if(Math.abs(n)>=1e5) return '₹'+(n/1e5).toFixed(1)+'L'; if(Math.abs(n)>=1e3) return '₹'+(n/1e3).toFixed(0)+'k'; return '₹'+n; }
+const _iso=d=>d.toISOString().slice(0,10);
+/** time buckets over the last `months` months: weekly for short windows, else monthly */
+function repBins(months){
+  const end=new Date(nowDate()); const start=new Date(end); start.setMonth(start.getMonth()-months); start.setDate(start.getDate()+1);
+  const weekly=months<=2;
+  const bins: {from:string;to:string;ym?:string;label:string}[]=[];
+  const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  if(weekly){
+    let s=new Date(start);
+    while(s<=end){ const e=new Date(s); e.setDate(e.getDate()+6); bins.push({from:_iso(s),to:_iso(e),label:s.getDate()+' '+MON[s.getMonth()]}); s=new Date(e); s.setDate(s.getDate()+1); }
+  } else {
+    let y=start.getFullYear(), m=start.getMonth(); const ey=end.getFullYear(), em=end.getMonth();
+    while(y<ey||(y===ey&&m<=em)){ const ym=y+'-'+String(m+1).padStart(2,'0'); bins.push({from:ym+'-01',to:ym+'-31',ym,label:MON[m]+" '"+String(y).slice(2)}); m++; if(m>11){m=0;y++;} }
+  }
+  return {bins,weekly};
+}
+/** sum records into the time bins */
+function repBucket(records, dateFn, valFn, bins, weekly){
+  const out=bins.map(()=>0);
+  (records||[]).forEach(r=>{ const d=dateFn(r); if(!d) return; const ds=String(d).slice(0,10);
+    if(weekly){ for(let i=0;i<bins.length;i++){ if(ds>=bins[i].from&&ds<=bins[i].to){ out[i]+=valFn(r)||0; break; } } }
+    else { const ym=ds.slice(0,7); const i=bins.findIndex(b=>b.ym===ym); if(i>=0) out[i]+=valFn(r)||0; }
+  });
+  return out;
+}
+/** MATLAB-style multi-series line chart (SVG, theme-aware) */
+function tsChart(title, labels, series, isMoney){
+  const W=760,H=280,padL=66,padR=18,padT=14,padB=46, iw=W-padL-padR, ih=H-padT-padB;
+  const nice=niceMax(Math.max(1,...series.flatMap(s=>s.data)));
+  const n=labels.length;
+  const X=i=>n>1?padL+i*(iw/(n-1)):padL+iw/2;
+  const Y=v=>padT+ih-(v/nice)*ih;
+  let grid='';
+  for(let g=0;g<=4;g++){ const val=nice/4*g, yy=Y(val); grid+=`<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${W-padR}" y2="${yy.toFixed(1)}" stroke="var(--line2)"/><text x="${(padL-8).toFixed(0)}" y="${(yy+4).toFixed(1)}" text-anchor="end" class="ts-ax">${isMoney?fmtShort(val):(+val.toFixed(0))}</text>`; }
+  const step=Math.max(1,Math.ceil(n/9)); let xl='';
+  labels.forEach((lb,i)=>{ if(i%step===0||i===n-1) xl+=`<text x="${X(i).toFixed(1)}" y="${(H-padB+18).toFixed(0)}" text-anchor="middle" class="ts-ax">${esc(lb)}</text>`; });
+  const draw=series.map(s=>{
+    const d=s.data.map((v,i)=>(i?'L':'M')+X(i).toFixed(1)+' '+Y(v).toFixed(1)).join(' ');
+    const mk=s.data.map((v,i)=>`<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="2.6" fill="${s.color}"><title>${esc(s.name)} · ${esc(labels[i])}: ${isMoney?money(v):v}</title></circle>`).join('');
+    return `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>${mk}`;
+  }).join('');
+  const legend=series.map(s=>`<span class="ts-leg"><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join('');
+  return `<div class="panel"><div class="inv-head"><h2>${esc(title)}</h2><div class="ts-legend">${legend}</div></div>
+    <div style="padding:8px 12px 14px"><svg viewBox="0 0 ${W} ${H}" class="ts-chart" preserveAspectRatio="xMidYMid meet" role="img">
+      <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${(padT+ih).toFixed(0)}" stroke="var(--line)"/>${grid}${draw}${xl}</svg></div></div>`;
+}
+function setRepTab(t){ repTab=t; renderView(); window.scrollTo(0,0); }
+function setRepMonth(m){ repMonth=m; renderView(); }
+/** step a YYYY-MM back by k months */
+function ymMinus(ym,k){ let [y,m]=ym.split('-').map(Number); m-=k; while(m<=0){ m+=12; y--; } return y+'-'+String(m).padStart(2,'0'); }
+/** every YYYY-MM that has any dated activity, newest first */
+function repMonthsList(){
+  const set=new Set<string>();
+  const add=d=>{ const ym=String(d||'').slice(0,7); if(/^\d{4}-\d{2}$/.test(ym)) set.add(ym); };
+  try{ (typeof BILL!=='undefined'?BILL.docs:[]).forEach(d=>add(d.date)); }catch{}
+  try{ if(typeof MR!=='undefined'){ (MR.pos||[]).forEach(p=>add(p.date)); (MR.requests||[]).forEach(r=>add(r.date)); } }catch{}
+  try{ if(typeof jcr!=='undefined') (jcr.entries||[]).forEach(e=>add(e.date)); }catch{}
+  try{ (state.movements||[]).forEach(m=>add(m.date)); }catch{}
+  return [...set].sort().reverse();
+}
+const repKpi=(v,l,c?)=>`<div class="loc-card" style="cursor:default"><div class="lc-qty"${c?` style="color:${c}"`:''}>${v}</div><div class="lc-sub" style="margin-top:8px">${esc(l)}</div></div>`;
+/** horizontal labelled bar for the analysis panels */
+function repBar(label,val,max,disp,color){
+  color=color||'var(--blue)';
+  return `<div style="display:flex;align-items:center;gap:14px;margin-bottom:12px"><div style="width:200px;font-weight:600;color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(label)}</div><div style="flex:1;height:12px;background:var(--bg);border-radius:6px;overflow:hidden"><div style="height:100%;width:${Math.max(0,Math.min(100,max?val/max*100:0))}%;background:${color};border-radius:6px"></div></div><div style="width:130px;text-align:right;font-weight:800">${disp}</div></div>`;
+}
+const MONADS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const ymLabel=ym=>{ const [y,m]=ym.split('-'); return MONADS[(+m)-1]+" '"+y.slice(2); };
+
 function reportsHTML(){
+  const tabs=[['monthly','Monthly Review'],['trends','Trends (charts)'],['sales','Sales & Billing'],['procurement','Procurement'],['projects','Projects & Job Cost'],['inventory','Inventory']];
+  let body='';
+  if(repTab==='monthly') body=repMonthly();
+  else if(repTab==='trends') body=repTrends();
+  else if(repTab==='procurement') body=repProcurement();
+  else if(repTab==='projects') body=repProjects();
+  else if(repTab==='inventory') body=repInventory();
+  else body=repSales();
+  return `<div class="page-hero"><div class="ph-img"></div><div class="ph-grad"></div><div class="ph-body"><div class="ph-eyebrow">Reports &amp; Analysis</div><h1>Business Analytics</h1><p>Live analysis across sales, procurement, projects and inventory — export any view to CSV.</p></div></div>
+    <div class="panel" style="padding:0"><div class="tabs" style="overflow-x:auto;padding:4px 10px">${tabs.map(t=>`<button class="tab ${repTab===t[0]?'active':''}" onclick="setRepTab('${t[0]}')">${t[1]}</button>`).join('')}
+      <div style="margin-left:auto;align-self:center;display:flex;gap:8px">
+        <button class="btn ghost sm" onclick="repExport()">${svg('<path d="M12 15V3M7 10l5 5 5-5"/><path d="M4 21h16"/>')} Export CSV</button>
+        <button class="btn sm" onclick="generateStatsPDF()">${svg(IC.billing)} Statistical report (PDF)</button>
+      </div></div></div>
+    ${body}`;
+}
+
+/* ---- Monthly Review — one month across every module, for the team meeting ---- */
+function repMonthly(){
+  const months=repMonthsList();
+  const ym=(repMonth && months.includes(repMonth)) ? repMonth : (months[0]||nowDate().slice(0,7));
+  const inYM=d=>String(d||'').slice(0,7)===ym;
+  const docs=(typeof BILL!=='undefined'?BILL.docs:[])||[];
+  const T=d=>(typeof billTotals==='function')?billTotals(d).total:0;
+  const poValue=p=>(p.lines||[]).reduce((s,l)=>s+(+l.qty||0)*(+l.rate||0),0);
+  const mvVal=m=>((item(m.code)||{}).rate||0)*(+m.qty||0);
+
+  // --- Sales / billing this month ---
+  const invM=docs.filter(d=>d.type==='invoice'&&inYM(d.date));
+  const invVal=invM.reduce((s,d)=>s+T(d),0);
+  const collected=docs.filter(d=>d.type==='invoice'&&d.status==='Paid'&&inYM(d.date)).reduce((s,d)=>s+T(d),0);
+  const quoM=docs.filter(d=>d.type==='quotation'&&inYM(d.date));
+  const quoVal=quoM.reduce((s,d)=>s+T(d),0);
+  const quoWon=quoM.filter(d=>d.status==='Accepted').length;
+
+  // --- Procurement this month ---
+  const posM=(typeof MR!=='undefined'?MR.pos:[]).filter(p=>inYM(p.date));
+  const poVal=posM.reduce((s,p)=>s+poValue(p),0);
+  const mrsM=(typeof MR!=='undefined'?MR.requests:[]).filter(r=>inYM(r.date)).length;
+  let grnVal=0;
+  (typeof MR!=='undefined'?MR.pos:[]).forEach(p=>(p.receipts||[]).forEach(rc=>{ if(inYM(rc.date)) (rc.lines||[]).forEach(rl=>{ const ln=(p.lines||[]).find(l=>l.code===rl.code); grnVal+=(+rl.qty||0)*(ln?+ln.rate||0:0); }); }));
+  const byVendor: Record<string,number>={};
+  posM.forEach(p=>{ const v=vendor(p.vendorId); const nm=v?v.name:(p.vendorId||'—'); byVendor[nm]=(byVendor[nm]||0)+poValue(p); });
+  const vTop=Object.entries(byVendor).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const vMax=Math.max(1,...vTop.map(v=>v[1]));
+
+  // --- Project cost incurred this month ---
+  const entM=(typeof jcr!=='undefined'?jcr.entries:[]).filter(e=>!e.archived&&inYM(e.date));
+  const costVal=entM.reduce((s,e)=>s+(e.amount||0),0);
+  const byCat: Record<string,number>={};
+  entM.forEach(e=>{ byCat[e.category||'Other']=(byCat[e.category||'Other']||0)+(e.amount||0); });
+  const catRows=Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
+  const byProj: Record<string,number>={};
+  entM.forEach(e=>{ const nm=(typeof projName==='function')?projName(e.projectId):e.projectId; byProj[nm]=(byProj[nm]||0)+(e.amount||0); });
+  const pTop=Object.entries(byProj).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const pMax=Math.max(1,...pTop.map(p=>p[1]));
+
+  // --- Inventory flow this month ---
+  const mv=(state.movements||[]).filter(m=>inYM(m.date));
+  const inflow=mv.filter(m=>m.type==='IN').reduce((s,m)=>s+mvVal(m),0);
+  const consumed=mv.filter(m=>m.type==='CONSUME').reduce((s,m)=>s+mvVal(m),0);
+  const issued=mv.filter(m=>m.type==='OUT').reduce((s,m)=>s+mvVal(m),0);
+
+  // --- Tenders this month ---
+  const tenders=(typeof TDR!=='undefined'?TDR.tenders:[])||[];
+  const tSub=tenders.filter(t=>inYM(t.submittedDate)).length;
+  const tWon=tenders.filter(t=>inYM(t.awardDate)).length;
+  const tLost=tenders.filter(t=>(t.history||[]).some(h=>h.to==='Lost'&&inYM(h.at))).length;
+
+  // --- 6-month trend ending at the selected month ---
+  const trend=[5,4,3,2,1,0].map(k=>ymMinus(ym,k));
+  const invOf=m=>docs.filter(d=>d.type==='invoice'&&String(d.date||'').slice(0,7)===m).reduce((s,d)=>s+T(d),0);
+  const colOf=m=>docs.filter(d=>d.type==='invoice'&&d.status==='Paid'&&String(d.date||'').slice(0,7)===m).reduce((s,d)=>s+T(d),0);
+  const poOf=m=>(typeof MR!=='undefined'?MR.pos:[]).filter(p=>String(p.date||'').slice(0,7)===m).reduce((s,p)=>s+poValue(p),0);
+  const costOf=m=>(typeof jcr!=='undefined'?jcr.entries:[]).filter(e=>!e.archived&&String(e.date||'').slice(0,7)===m).reduce((s,e)=>s+(e.amount||0),0);
+  const trendRows=trend.map(m=>`<tr${m===ym?' style="background:var(--blue-l);font-weight:700"':''}><td>${ymLabel(m)}</td><td class="r">${money(invOf(m))}</td><td class="r">${money(colOf(m))}</td><td class="r">${money(poOf(m))}</td><td class="r">${money(costOf(m))}</td><td class="r">${money(invOf(m)-costOf(m)-poOf(m))}</td></tr>`).join('');
+
+  const monthOpts=months.map(m=>`<option value="${m}" ${m===ym?'selected':''}>${ymLabel(m)}</option>`).join('')||`<option>${ymLabel(ym)}</option>`;
+  const miniPanel=(title,rows,maxv,color)=>`<div class="panel"><div class="inv-head"><h2>${title}</h2></div><div style="padding:16px 20px">${rows.length?rows.map(r=>repBar(r[0],r[1],maxv,money(r[1]),color)).join(''):'<div style="color:var(--muted)">No activity this month.</div>'}</div></div>`;
+
+  return `<div class="panel" style="display:flex;align-items:center;gap:14px;padding:14px 20px;margin-bottom:4px">
+      <span style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--dim)">Reporting month</span>
+      <select class="f" style="min-width:170px;font-weight:600" onchange="setRepMonth(this.value)">${monthOpts}</select>
+      <span style="color:var(--muted);font-size:13px;margin-left:auto">Snapshot for the team meeting — every figure is for ${ymLabel(ym)}</span></div>
+
+    <div class="loc-row" style="grid-template-columns:repeat(4,1fr)">
+      ${repKpi(money(invVal),'Invoiced',' var(--ink)')}${repKpi(money(collected),'Collected','var(--green)')}${repKpi(money(poVal),'Procurement (POs)','#a855f7')}${repKpi(money(costVal),'Project cost incurred','var(--blue)')}</div>
+    <div class="loc-row" style="grid-template-columns:repeat(4,1fr)">
+      ${repKpi(invM.length,'Invoices raised')}${repKpi(quoM.length+' · '+quoWon+' won','Quotations')}${repKpi(mrsM+' MR · '+posM.length+' PO','Requests / orders')}${repKpi(tSub+' / '+tWon+' / '+tLost,'Tenders sub/won/lost')}</div>
+
+    <div class="panel"><div class="inv-head"><h2>6-month trend (to ${ymLabel(ym)})</h2></div>
+      <div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>Month</th><th class="r">Invoiced</th><th class="r">Collected</th><th class="r">Procurement</th><th class="r">Project cost</th><th class="r">Net</th></tr></thead><tbody>${trendRows}</tbody></table></div>
+      <div class="jc-hint" style="padding:10px 20px">Net = Invoiced − Project cost − Procurement spend (indicative cash direction, not accounting profit).</div></div>
+
+    ${miniPanel('Project cost by category',catRows,Math.max(1,...catRows.map(c=>c[1])),'var(--blue)')}
+    ${miniPanel('Project cost by project',pTop,pMax,'#34d399')}
+    ${miniPanel('Procurement spend by vendor',vTop,vMax,'#a855f7')}
+
+    <div class="panel"><div class="inv-head"><h2>Inventory flow — ${ymLabel(ym)}</h2></div>
+      <table class="jc-tbl"><thead><tr><th>Movement</th><th class="r">Value</th></tr></thead><tbody>
+        <tr><td><b>Stock received (IN)</b></td><td class="r b" style="color:var(--green)">${money(inflow)}</td></tr>
+        <tr><td><b>Consumed on site</b></td><td class="r b">${money(consumed)}</td></tr>
+        <tr><td><b>Issued out</b></td><td class="r b">${money(issued)}</td></tr>
+        <tr><td>Movements recorded</td><td class="r">${mv.length}</td></tr>
+      </tbody></table></div>`;
+}
+
+/* ---- Trends — plotted time series across every module, over a chosen window ---- */
+function repTrends(){
+  const ranges=[[1,'1M'],[2,'2M'],[3,'3M'],[6,'6M'],[12,'12M']];
+  const {bins,weekly}=repBins(repRange);
+  const labels=bins.map(b=>b.label);
+  const docs=(typeof BILL!=='undefined'?BILL.docs:[])||[];
+  const T=d=>(typeof billTotals==='function')?billTotals(d).total:0;
+  const poValue=p=>(p.lines||[]).reduce((s,l)=>s+(+l.qty||0)*(+l.rate||0),0);
+  const mvVal=m=>((item(m.code)||{}).rate||0)*(+m.qty||0);
+  const pos=(typeof MR!=='undefined'?MR.pos:[])||[];
+  const ents=(typeof jcr!=='undefined'?jcr.entries:[])||[];
+  const mvs=(state.movements||[]);
+  const tends=(typeof TDR!=='undefined'?TDR.tenders:[])||[];
+
+  const invoiced=repBucket(docs.filter(d=>d.type==='invoice'),d=>d.date,T,bins,weekly);
+  const collected=repBucket(docs.filter(d=>d.type==='invoice'&&d.status==='Paid'),d=>d.date,T,bins,weekly);
+  const quoted  =repBucket(docs.filter(d=>d.type==='quotation'),d=>d.date,T,bins,weekly);
+  const procure =repBucket(pos,p=>p.date,poValue,bins,weekly);
+  const projCost=repBucket(ents.filter(e=>!e.archived),e=>e.date,e=>e.amount||0,bins,weekly);
+  const received=repBucket(mvs.filter(m=>m.type==='IN'),m=>m.date,mvVal,bins,weekly);
+  const consumed=repBucket(mvs.filter(m=>m.type==='CONSUME'),m=>m.date,mvVal,bins,weekly);
+  const tSub=repBucket(tends,t=>t.submittedDate,()=>1,bins,weekly);
+  const tWon=repBucket(tends,t=>t.awardDate,()=>1,bins,weekly);
+  const net=invoiced.map((v,i)=>v-projCost[i]-procure[i]);
+
+  const sum=a=>a.reduce((s,v)=>s+v,0);
+  const C={blue:'#2563eb',green:'#16a34a',purple:'#a855f7',amber:'#d97706',red:'#dc2626',teal:'#0d9488'};
+  const rangeBtns=ranges.map(r=>`<button class="seg-btn ${repRange===r[0]?'on':''}" onclick="setRepRange(${r[0]})">${r[1]}</button>`).join('');
+
+  return `<div class="panel" style="display:flex;align-items:center;gap:14px;padding:14px 20px;margin-bottom:4px;flex-wrap:wrap">
+      <span style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--dim)">Time window</span>
+      <div class="seg">${rangeBtns}</div>
+      <span style="color:var(--muted);font-size:13px;margin-left:auto">${weekly?'Weekly':'Monthly'} resolution · ${labels.length} points · last ${repRange} month${repRange===1?'':'s'}</span></div>
+    <div class="loc-row" style="grid-template-columns:repeat(4,1fr)">
+      ${repKpi(money(sum(invoiced)),'Invoiced (window)')}${repKpi(money(sum(procure)),'Procurement (window)','#a855f7')}${repKpi(money(sum(projCost)),'Project cost (window)','var(--blue)')}${repKpi(money(sum(net)),'Net direction',sum(net)>=0?'var(--green)':'#dc2626')}</div>
+    ${tsChart('Revenue — invoiced vs collected',labels,[{name:'Invoiced',color:C.blue,data:invoiced},{name:'Collected',color:C.green,data:collected}],true)}
+    ${tsChart('Sales pipeline — quotations raised',labels,[{name:'Quoted',color:C.teal,data:quoted}],true)}
+    ${tsChart('Outflow — project cost vs procurement spend',labels,[{name:'Project cost',color:C.blue,data:projCost},{name:'Procurement',color:C.purple,data:procure}],true)}
+    ${tsChart('Inventory flow — received vs consumed',labels,[{name:'Received',color:C.green,data:received},{name:'Consumed',color:C.amber,data:consumed}],true)}
+    ${tsChart('Net cash direction (invoiced − cost − procurement)',labels,[{name:'Net',color:C.teal,data:net}],true)}
+    ${tsChart('Tenders — submitted vs won',labels,[{name:'Submitted',color:C.blue,data:tSub},{name:'Won',color:C.green,data:tWon}],false)}`;
+}
+
+/* ---- Sales & Billing analysis (from BILL.docs) ---- */
+function repSales(){
+  const docs=(typeof BILL!=='undefined'?BILL.docs:[])||[];
+  const T=d=>(typeof billTotals==='function')?billTotals(d).total:0;
+  const sum=f=>docs.filter(f).reduce((s,d)=>s+T(d),0);
+  const quoted=sum(d=>d.type==='quotation');
+  const invoiced=sum(d=>d.type==='invoice');
+  const paid=sum(d=>d.type==='invoice'&&d.status==='Paid');
+  const outstanding=sum(d=>d.type==='invoice'&&!['Paid','Draft'].includes(d.status));
+  const quotes=docs.filter(d=>d.type==='quotation');
+  const won=quotes.filter(d=>d.status==='Accepted').length;
+  const winRate=quotes.length?Math.round(won/quotes.length*100):0;
+  // monthly invoiced trend
+  const byMonth: Record<string,number>={};
+  docs.filter(d=>d.type==='invoice').forEach(d=>{ const ym=(d.date||'').slice(0,7); if(ym) byMonth[ym]=(byMonth[ym]||0)+T(d); });
+  const months=Object.keys(byMonth).sort().slice(-8);
+  const mMax=Math.max(1,...months.map(m=>byMonth[m]));
+  // top clients by invoiced value
+  const byClient: Record<string,number>={};
+  docs.filter(d=>d.type==='invoice').forEach(d=>{ const c=d.party||'—'; byClient[c]=(byClient[c]||0)+T(d); });
+  const clients=Object.entries(byClient).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const cMax=Math.max(1,...clients.map(c=>c[1]));
+  const typeRow=(t,lbl)=>{ const ds=docs.filter(d=>d.type===t); return `<tr><td><b>${lbl}</b></td><td class="r">${ds.length}</td><td class="r b">${money(ds.reduce((s,d)=>s+T(d),0))}</td></tr>`; };
+  return `<div class="loc-row" style="grid-template-columns:repeat(4,1fr)">
+      ${repKpi(money(invoiced),'Total invoiced')}${repKpi(money(paid),'Collected (paid)','var(--green)')}${repKpi(money(outstanding),'Outstanding','#b45309')}${repKpi(winRate+'%','Quote win rate','var(--blue)')}</div>
+    <div class="panel"><div class="inv-head"><h2>Invoiced by month</h2></div><div style="padding:18px 22px">
+      ${months.length?months.map(m=>repBar(ymLabel(m),byMonth[m],mMax,money(byMonth[m]),'var(--blue)')).join(''):'<div style="color:var(--muted)">No invoices yet.</div>'}</div></div>
+    <div class="panel"><div class="inv-head"><h2>Top clients by invoiced value</h2></div><div style="padding:18px 22px">
+      ${clients.length?clients.map(c=>repBar(c[0],c[1],cMax,money(c[1]),'#34d399')).join(''):'<div style="color:var(--muted)">No client billing yet.</div>'}</div></div>
+    <div class="panel"><div class="inv-head"><h2>By document type</h2></div>
+      <table class="jc-tbl"><thead><tr><th>Type</th><th class="r">Count</th><th class="r">Value</th></tr></thead>
+      <tbody>${typeRow('quotation','Quotations')}${typeRow('cpo','Customer POs')}${typeRow('vpo','Vendor POs')}${typeRow('invoice','Invoices')}</tbody></table></div>`;
+}
+
+/* ---- Procurement analysis (from MR + POs) ---- */
+function repProcurement(){
+  const reqs=(typeof MR!=='undefined'?MR.requests:[])||[];
+  const pos=(typeof MR!=='undefined'?MR.pos:[])||[];
+  const poVal=po=>(po.lines||[]).reduce((s,l)=>s+(+l.qty||0)*(+l.rate||0),0);
+  const totalPO=pos.reduce((s,p)=>s+poVal(p),0);
+  const openMRs=reqs.filter(r=>!['Delivered','Closed','Cancelled','Rejected'].includes(r.status)).length;
+  const overdue=reqs.filter(r=>typeof mrOverdue==='function'&&mrOverdue(r)).length;
+  // spend by vendor
+  const byVendor: Record<string,number>={};
+  pos.forEach(p=>{ const v=vendor(p.vendorId); const name=v?v.name:(p.vendorId||'—'); byVendor[name]=(byVendor[name]||0)+poVal(p); });
+  const vendors=Object.entries(byVendor).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const vMax=Math.max(1,...vendors.map(v=>v[1]));
+  // spend by project (via the MR each PO is against)
+  const byProj: Record<string,number>={};
+  pos.forEach(p=>{ const r=reqs.find(x=>x.id===p.mrId); const pid=r?r.projectId:'—'; const name=(typeof projName==='function')?projName(pid):pid; byProj[name]=(byProj[name]||0)+poVal(p); });
+  const projs=Object.entries(byProj).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const pMax=Math.max(1,...projs.map(p=>p[1]));
+  // status mix
+  const statuses=[...new Set(reqs.map(r=>r.status))];
+  const stRow=statuses.map(s=>`<tr><td><b>${esc(s)}</b></td><td class="r">${reqs.filter(r=>r.status===s).length}</td></tr>`).join('');
+  return `<div class="loc-row" style="grid-template-columns:repeat(4,1fr)">
+      ${repKpi(reqs.length,'Material requests')}${repKpi(openMRs,'Open requests','var(--blue)')}${repKpi(overdue,'Overdue',overdue?'#b91c1c':'var(--green)')}${repKpi(money(totalPO),'Total PO value')}</div>
+    <div class="panel"><div class="inv-head"><h2>Spend by vendor</h2></div><div style="padding:18px 22px">
+      ${vendors.length?vendors.map(v=>repBar(v[0],v[1],vMax,money(v[1]),'var(--blue)')).join(''):'<div style="color:var(--muted)">No purchase orders yet.</div>'}</div></div>
+    <div class="panel"><div class="inv-head"><h2>Procurement spend by project</h2></div><div style="padding:18px 22px">
+      ${projs.length?projs.map(p=>repBar(p[0],p[1],pMax,money(p[1]),'#a855f7')).join(''):'<div style="color:var(--muted)">No purchase orders yet.</div>'}</div></div>
+    <div class="panel"><div class="inv-head"><h2>Requests by status</h2></div>
+      <table class="jc-tbl"><thead><tr><th>Status</th><th class="r">Requests</th></tr></thead><tbody>${stRow||'<tr class="empty-row"><td colspan="2">No requests.</td></tr>'}</tbody></table></div>`;
+}
+
+/* ---- Projects & job-cost analysis (from jcr) ---- */
+function repProjects(){
+  const projs=(typeof jcr!=='undefined'?jcr.projects:[]).filter(p=>!p.archived);
+  const cv=projs.reduce((s,p)=>s+(+p.originalCV||0),0);
+  const actual=projs.reduce((s,p)=>s+projActual(p.id),0);
+  const margin=cv-actual;
+  const over=projs.filter(p=>(+p.originalCV||0) && projActual(p.id)>(+p.originalCV||0)).length;
+  const rows=projs.slice().sort((a,b)=>(b.originalCV||0)-(a.originalCV||0)).map(p=>{
+    const a=projActual(p.id), c=+p.originalCV||0, m=c-a, pct=c?Math.round(a/c*100):0;
+    const col=a>c?'#b91c1c':pct>85?'#b45309':'var(--green)';
+    return `<tr><td><b>${esc(p.name)}</b><div class="t-cmp-src">${esc(p.jobCode)} · ${esc(p.status||'')}</div></td>
+      <td class="r">${jcMoney(c)}</td><td class="r">${jcMoney(a)}</td><td class="r" style="color:${m<0?'#b91c1c':'var(--green)'}">${jcMoney(m)}</td>
+      <td class="r" style="color:${col};font-weight:700">${pct}%</td></tr>`;
+  }).join('')||`<tr class="empty-row"><td colspan="5">No projects.</td></tr>`;
+  const cMax=Math.max(1,...projs.map(p=>Math.max(+p.originalCV||0,projActual(p.id))));
+  return `<div class="loc-row" style="grid-template-columns:repeat(4,1fr)">
+      ${repKpi(projs.length,'Active projects')}${repKpi(money(cv),'Contract value')}${repKpi(money(actual),'Actual cost','var(--blue)')}${repKpi(over,'Over budget',over?'#b91c1c':'var(--green)')}</div>
+    <div class="panel"><div class="inv-head"><h2>Contract vs actual cost</h2></div><div style="padding:18px 22px">
+      ${projs.slice().sort((a,b)=>(b.originalCV||0)-(a.originalCV||0)).map(p=>repBar(p.name+' · contract',(+p.originalCV||0),cMax,jcMoney(+p.originalCV||0),'#bcd2fb')+repBar(p.name+' · actual',projActual(p.id),cMax,jcMoney(projActual(p.id)), projActual(p.id)>(+p.originalCV||0)?'#ef4444':'var(--blue)')).join('')||'<div style="color:var(--muted)">No projects.</div>'}</div></div>
+    <div class="panel"><div class="inv-head"><h2>Per-project summary</h2></div>
+      <div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>Project</th><th class="r">Contract</th><th class="r">Actual</th><th class="r">Margin</th><th class="r">Spent %</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+
+/* ---- Inventory analysis (original report, kept) ---- */
+function repInventory(){
   const totVal=state.items.reduce((s,it)=>s+state.locations.reduce((a,l)=>a+Math.max(0,onHand(it.code,l.id))*it.rate,0),0);
   const low=state.items.filter(it=>it.type!=='equipment'&&onHand(it.code,'WH-MAIN')>0&&onHand(it.code,'WH-MAIN')<=it.reorder).length;
   const resv=state.reservations.filter(r=>r.status==='active').length;
   const transit=state.movements.filter(m=>m.type==='TRANSFER'&&m.to==='TRANSIT'&&!m.received).length;
   const byLoc=state.locations.map(l=>({name:l.name,v:state.items.reduce((s,it)=>s+Math.max(0,onHand(it.code,l.id))*it.rate,0)}));
   const max=Math.max(1,...byLoc.map(x=>x.v));
-  const kpi=(v,l)=>`<div class="loc-card" style="cursor:default"><div class="lc-qty">${v}</div><div class="lc-sub" style="margin-top:8px">${l}</div></div>`;
-  return `<div class="page-hero"><div class="ph-img"></div><div class="ph-grad"></div><div class="ph-body"><div class="ph-eyebrow">Reports</div><h1>Inventory Reports</h1><p>Stock value and movement analytics across all locations.</p></div></div>
-    <div class="loc-row" style="grid-template-columns:repeat(4,1fr)">${kpi(money(totVal),'Total stock value')}${kpi(low,'Low-stock materials')}${kpi(resv,'Active reservations')}${kpi(transit,'In-transit transfers')}</div>
+  return `<div class="loc-row" style="grid-template-columns:repeat(4,1fr)">${repKpi(money(totVal),'Total stock value')}${repKpi(low,'Low-stock materials',low?'#b45309':'var(--green)')}${repKpi(resv,'Active reservations')}${repKpi(transit,'In-transit transfers')}</div>
     <div class="panel"><div class="inv-head"><h2>Stock value by location</h2></div><div style="padding:18px 22px">
-      ${byLoc.map(x=>`<div style="display:flex;align-items:center;gap:14px;margin-bottom:14px"><div style="width:160px;font-weight:600;color:var(--muted);font-size:13px">${esc(x.name)}</div><div style="flex:1;height:12px;background:var(--bg);border-radius:6px;overflow:hidden"><div style="height:100%;width:${x.v/max*100}%;background:var(--blue);border-radius:6px"></div></div><div style="width:120px;text-align:right;font-weight:800">${money(x.v)}</div></div>`).join('')}
+      ${byLoc.map(x=>repBar(x.name,x.v,max,money(x.v),'var(--blue)')).join('')}
     </div></div>`;
 }
+
+/* ---- CSV export for the active report tab ---- */
+function repExport(){
+  const T=d=>(typeof billTotals==='function')?billTotals(d).total:0;
+  let rows: CsvRow[]=[]; let name='report.csv';
+  if(repTab==='monthly'){
+    const months=repMonthsList();
+    const ym=(repMonth&&months.includes(repMonth))?repMonth:(months[0]||nowDate().slice(0,7));
+    const inYM=d=>String(d||'').slice(0,7)===ym;
+    const docs=(typeof BILL!=='undefined'?BILL.docs:[])||[];
+    const poValue=p=>(p.lines||[]).reduce((s,l)=>s+(+l.qty||0)*(+l.rate||0),0);
+    const invVal=docs.filter(d=>d.type==='invoice'&&inYM(d.date)).reduce((s,d)=>s+T(d),0);
+    const collected=docs.filter(d=>d.type==='invoice'&&d.status==='Paid'&&inYM(d.date)).reduce((s,d)=>s+T(d),0);
+    const quoVal=docs.filter(d=>d.type==='quotation'&&inYM(d.date)).reduce((s,d)=>s+T(d),0);
+    const poVal=(typeof MR!=='undefined'?MR.pos:[]).filter(p=>inYM(p.date)).reduce((s,p)=>s+poValue(p),0);
+    const mrsM=(typeof MR!=='undefined'?MR.requests:[]).filter(r=>inYM(r.date)).length;
+    const costVal=(typeof jcr!=='undefined'?jcr.entries:[]).filter(e=>!e.archived&&inYM(e.date)).reduce((s,e)=>s+(e.amount||0),0);
+    const mv=(state.movements||[]).filter(m=>inYM(m.date));
+    const mvVal=m=>((item(m.code)||{}).rate||0)*(+m.qty||0);
+    const inflow=mv.filter(m=>m.type==='IN').reduce((s,m)=>s+mvVal(m),0);
+    const consumed=mv.filter(m=>m.type==='CONSUME').reduce((s,m)=>s+mvVal(m),0);
+    const tenders=(typeof TDR!=='undefined'?TDR.tenders:[])||[];
+    name='monthly_review_'+ym+'.csv';
+    rows=[['Monthly Review — '+ym],[],['Metric','Value'],
+      ['Invoiced',Math.round(invVal)],['Collected',Math.round(collected)],
+      ['Quotations raised (value)',Math.round(quoVal)],
+      ['Procurement spend (POs raised)',Math.round(poVal)],['Material requests raised',mrsM],
+      ['Project cost incurred',Math.round(costVal)],
+      ['Stock received (value)',Math.round(inflow)],['Consumed on site (value)',Math.round(consumed)],
+      ['Tenders submitted',tenders.filter(t=>inYM(t.submittedDate)).length],
+      ['Tenders won',tenders.filter(t=>inYM(t.awardDate)).length]];
+  } else if(repTab==='trends'){
+    const {bins,weekly}=repBins(repRange);
+    const labels=bins.map(b=>b.label);
+    const docs=(typeof BILL!=='undefined'?BILL.docs:[])||[];
+    const poValue=p=>(p.lines||[]).reduce((s,l)=>s+(+l.qty||0)*(+l.rate||0),0);
+    const mvVal=m=>((item(m.code)||{}).rate||0)*(+m.qty||0);
+    const inv=repBucket(docs.filter(d=>d.type==='invoice'),d=>d.date,T,bins,weekly);
+    const col=repBucket(docs.filter(d=>d.type==='invoice'&&d.status==='Paid'),d=>d.date,T,bins,weekly);
+    const quo=repBucket(docs.filter(d=>d.type==='quotation'),d=>d.date,T,bins,weekly);
+    const pro=repBucket((typeof MR!=='undefined'?MR.pos:[]),p=>p.date,poValue,bins,weekly);
+    const cost=repBucket((typeof jcr!=='undefined'?jcr.entries:[]).filter(e=>!e.archived),e=>e.date,e=>e.amount||0,bins,weekly);
+    const rec=repBucket((state.movements||[]).filter(m=>m.type==='IN'),m=>m.date,mvVal,bins,weekly);
+    const con=repBucket((state.movements||[]).filter(m=>m.type==='CONSUME'),m=>m.date,mvVal,bins,weekly);
+    name='trends_'+repRange+'m.csv';
+    rows=[['Period','Invoiced','Collected','Quoted','Procurement','Project cost','Stock received','Consumed','Net']];
+    labels.forEach((lb,i)=>rows.push([lb,Math.round(inv[i]),Math.round(col[i]),Math.round(quo[i]),Math.round(pro[i]),Math.round(cost[i]),Math.round(rec[i]),Math.round(con[i]),Math.round(inv[i]-cost[i]-pro[i])]));
+  } else if(repTab==='sales'){
+    name='sales_report.csv'; rows=[['Number','Type','Party','Project ref','Date','Status','Total']];
+    ((typeof BILL!=='undefined'?BILL.docs:[])||[]).forEach(d=>rows.push([d.number,d.type,d.party,(d.projectId||d.poNumber||''),d.date,d.status,Math.round(T(d))]));
+  } else if(repTab==='procurement'){
+    name='procurement_report.csv'; rows=[['PO','Vendor','Against MR','Project','Value','Expected','Status']];
+    const reqs=(typeof MR!=='undefined'?MR.requests:[])||[];
+    ((typeof MR!=='undefined'?MR.pos:[])||[]).forEach(p=>{ const v=vendor(p.vendorId); const r=reqs.find(x=>x.id===p.mrId); rows.push([p.id,v?v.name:p.vendorId,p.mrId,(r?projName(r.projectId):''),Math.round((p.lines||[]).reduce((s,l)=>s+(+l.qty||0)*(+l.rate||0),0)),p.expectedDate,p.status]); });
+  } else if(repTab==='projects'){
+    name='projects_report.csv'; rows=[['Job code','Project','Client','Status','Contract','Actual','Margin','Spent %']];
+    (typeof jcr!=='undefined'?jcr.projects:[]).filter(p=>!p.archived).forEach(p=>{ const a=projActual(p.id),c=+p.originalCV||0; rows.push([p.jobCode,p.name,p.client,p.status,Math.round(c),Math.round(a),Math.round(c-a),c?Math.round(a/c*100):0]); });
+  } else {
+    name='inventory_report.csv'; rows=[['Code','Item','Category','Unit','On hand (all locations)','Rate','Stock value']];
+    state.items.forEach(it=>{ let oh=0; state.locations.forEach(l=>oh+=Math.max(0,onHand(it.code,l.id))); rows.push([it.code,it.name,it.category,it.unit,oh,it.rate,Math.round(oh*it.rate)]); });
+  }
+  downloadCSV(name,rows);
+}
+
+/* ============================================================
+   STATISTICAL ANALYSIS → PDF (via the browser's print-to-PDF).
+   Descriptive statistics, distributions and trends across every
+   module. Self-contained document (inline styles) so it prints
+   cleanly. No external services.
+   ============================================================ */
+/** descriptive statistics for an array of numbers */
+function statSummary(a){
+  const n=a.length;
+  if(!n) return {n:0,sum:0,mean:0,median:0,min:0,max:0,sd:0,cv:0};
+  const sum=a.reduce((s,v)=>s+v,0), mean=sum/n;
+  const sorted=a.slice().sort((x,y)=>x-y);
+  const median=n%2?sorted[(n-1)/2]:(sorted[n/2-1]+sorted[n/2])/2;
+  const variance=a.reduce((s,v)=>s+(v-mean)*(v-mean),0)/n;
+  const sd=Math.sqrt(variance);
+  return {n,sum,mean,median,min:sorted[0],max:sorted[n-1],sd,cv:mean?sd/mean*100:0};
+}
+function generateStatsPDF(){
+  const esc2=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const M=n=>'₹'+Math.round(n).toLocaleString('en-IN');
+  const pct=(a,b)=>b?Math.round(a/b*100):0;
+  const docs=(typeof BILL!=='undefined'?BILL.docs:[])||[];
+  const T=d=>(typeof billTotals==='function')?billTotals(d).total:0;
+  const poValue=p=>(p.lines||[]).reduce((s,l)=>s+(+l.qty||0)*(+l.rate||0),0);
+  const pos=(typeof MR!=='undefined'?MR.pos:[])||[];
+  const reqs=(typeof MR!=='undefined'?MR.requests:[])||[];
+  const ents=((typeof jcr!=='undefined'?jcr.entries:[])||[]).filter(e=>!e.archived);
+  const projs=((typeof jcr!=='undefined'?jcr.projects:[])||[]).filter(p=>!p.archived);
+  const tends=(typeof TDR!=='undefined'?TDR.tenders:[])||[];
+  const mvs=(state.movements||[]);
+  const mvVal=m=>((item(m.code)||{}).rate||0)*(+m.qty||0);
+
+  // ---- 12-month series ----
+  const {bins}=repBins(12);
+  const labels=bins.map(b=>b.label);
+  const series: Record<string,number[]>={
+    'Invoiced': repBucket(docs.filter(d=>d.type==='invoice'),d=>d.date,T,bins,false),
+    'Collected': repBucket(docs.filter(d=>d.type==='invoice'&&d.status==='Paid'),d=>d.date,T,bins,false),
+    'Quotations': repBucket(docs.filter(d=>d.type==='quotation'),d=>d.date,T,bins,false),
+    'Procurement': repBucket(pos,p=>p.date,poValue,bins,false),
+    'Project cost': repBucket(ents,e=>e.date,e=>e.amount||0,bins,false),
+    'Stock received': repBucket(mvs.filter(m=>m.type==='IN'),m=>m.date,mvVal,bins,false),
+    'Consumed': repBucket(mvs.filter(m=>m.type==='CONSUME'),m=>m.date,mvVal,bins,false),
+  };
+
+  // ---- descriptive stats: monthly series ----
+  const seriesStatRows=Object.entries(series).map(([k,arr])=>{ const s=statSummary(arr);
+    return `<tr><td class="l">${k}</td><td>${M(s.sum)}</td><td>${M(s.mean)}</td><td>${M(s.median)}</td><td>${M(s.min)}</td><td>${M(s.max)}</td><td>${M(s.sd)}</td><td>${s.cv.toFixed(0)}%</td></tr>`;
+  }).join('');
+
+  // ---- transaction-level distributions ----
+  const invAmts=docs.filter(d=>d.type==='invoice').map(T);
+  const poAmts=pos.map(poValue);
+  const entAmts=ents.map(e=>e.amount||0);
+  const txStat=(lbl,a)=>{ const s=statSummary(a); return `<tr><td class="l">${lbl}</td><td>${s.n}</td><td>${M(s.sum)}</td><td>${M(s.mean)}</td><td>${M(s.median)}</td><td>${M(s.min)}</td><td>${M(s.max)}</td><td>${M(s.sd)}</td></tr>`; };
+
+  // ---- sales ----
+  const invTot=invAmts.reduce((s,v)=>s+v,0);
+  const collected=docs.filter(d=>d.type==='invoice'&&d.status==='Paid').reduce((s,d)=>s+T(d),0);
+  const outstanding=docs.filter(d=>d.type==='invoice'&&!['Paid','Draft'].includes(d.status)).reduce((s,d)=>s+T(d),0);
+  const quotes=docs.filter(d=>d.type==='quotation'); const quotesWon=quotes.filter(d=>d.status==='Accepted').length;
+  const byClient: Record<string,number>={}; docs.filter(d=>d.type==='invoice').forEach(d=>{ const c=d.party||'—'; byClient[c]=(byClient[c]||0)+T(d); });
+  const clientRows=Object.entries(byClient).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`<tr><td class="l">${esc2(c)}</td><td>${M(v)}</td><td>${pct(v,invTot)}%</td></tr>`).join('')||'<tr><td colspan="3" class="l">No invoices.</td></tr>';
+
+  // ---- procurement ----
+  const poTot=poAmts.reduce((s,v)=>s+v,0);
+  const byVendor: Record<string,number>={}; pos.forEach(p=>{ const v=vendor(p.vendorId); const nm=v?v.name:(p.vendorId||'—'); byVendor[nm]=(byVendor[nm]||0)+poValue(p); });
+  const vendorRows=Object.entries(byVendor).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`<tr><td class="l">${esc2(c)}</td><td>${M(v)}</td><td>${pct(v,poTot)}%</td></tr>`).join('')||'<tr><td colspan="3" class="l">No purchase orders.</td></tr>';
+
+  // ---- projects ----
+  const projRows=projs.slice().sort((a,b)=>(b.originalCV||0)-(a.originalCV||0)).map(p=>{ const cv=+p.originalCV||0, act=projActual(p.id), m=cv-act; return `<tr><td class="l">${esc2(p.name)} (${esc2(p.jobCode)})</td><td>${M(cv)}</td><td>${M(act)}</td><td>${M(m)}</td><td>${cv?((m/cv)*100).toFixed(1):'0'}%</td><td>${pct(act,cv)}%</td></tr>`; }).join('')||'<tr><td colspan="6" class="l">No projects.</td></tr>';
+  const cvTot=projs.reduce((s,p)=>s+(+p.originalCV||0),0), actTot=projs.reduce((s,p)=>s+projActual(p.id),0);
+  const marginPcts=projs.filter(p=>+p.originalCV).map(p=>((+p.originalCV-projActual(p.id))/(+p.originalCV))*100);
+  const marginStat=statSummary(marginPcts);
+  const overBudget=projs.filter(p=>(+p.originalCV||0)&&projActual(p.id)>(+p.originalCV||0)).length;
+
+  // ---- inventory ABC (top items by value share) ----
+  const itemVals=state.items.map(it=>{ let oh=0; state.locations.forEach(l=>oh+=Math.max(0,onHand(it.code,l.id))); return {it,val:oh*(it.rate||0),oh}; }).filter(x=>x.val>0).sort((a,b)=>b.val-a.val);
+  const invTotVal=itemVals.reduce((s,x)=>s+x.val,0);
+  let cum=0; const abcRows=itemVals.slice(0,12).map(x=>{ cum+=x.val; return `<tr><td class="l">${esc2(x.it.name)}</td><td>${esc2(x.it.code)}</td><td>${num(x.oh)}</td><td>${M(x.val)}</td><td>${pct(x.val,invTotVal)}%</td><td>${pct(cum,invTotVal)}%</td></tr>`; }).join('');
+  const lowCt=state.items.filter(it=>it.type!=='equipment'&&onHand(it.code,'WH-MAIN')>0&&onHand(it.code,'WH-MAIN')<=it.reorder).length;
+
+  // ---- tenders ----
+  const tStatus: Record<string,number>={}; tends.forEach(t=>{ tStatus[t.status]=(tStatus[t.status]||0)+1; });
+  const tStatusRows=Object.entries(tStatus).map(([s,c])=>`<tr><td class="l">${esc2(s)}</td><td>${c}</td></tr>`).join('')||'<tr><td colspan="2" class="l">No tenders.</td></tr>';
+  const decided=tends.filter(t=>['Won','Lost'].includes(t.status)).length;
+  const wonT=tends.filter(t=>t.status==='Won').length;
+  const bidStat=statSummary(tends.filter(t=>t.submittedValue).map(t=>+t.submittedValue));
+
+  // ---- monthly series table ----
+  const monthCols=labels.map(l=>`<th>${l}</th>`).join('');
+  const monthBody=Object.entries(series).map(([k,arr])=>`<tr><td class="l">${k}</td>${arr.map(v=>`<td>${v?M(v):'–'}</td>`).join('')}</tr>`).join('');
+
+  // ---- simple inline bar chart (monthly invoiced) ----
+  const invSeries=series['Invoiced']; const invMax=Math.max(1,...invSeries);
+  const bars=invSeries.map((v,i)=>`<div style="display:flex;align-items:center;gap:8px;margin:3px 0"><div style="width:52px;font-size:10px;color:#555">${labels[i]}</div><div style="flex:1;background:#eef2f7;height:12px;border-radius:3px;overflow:hidden"><div style="height:100%;width:${v/invMax*100}%;background:#2563eb"></div></div><div style="width:92px;text-align:right;font-size:10px">${v?M(v):'–'}</div></div>`).join('');
+
+  const kpi=(l,v)=>`<div class="kpi"><div class="kv">${v}</div><div class="kl">${l}</div></div>`;
+  const now=new Date();
+  const html=`<!doctype html><html><head><meta charset="utf-8"><title>Statistical Analysis — ${esc2(COMPANY.name)}</title>
+  <style>
+  *{font-family:Inter,Arial,sans-serif;box-sizing:border-box}
+  body{margin:0;padding:38px 44px;color:#0f172a;font-size:12px;line-height:1.5}
+  .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #2563eb;padding-bottom:14px;margin-bottom:6px}
+  .co{font-size:19px;font-weight:800}.co small{display:block;font-weight:400;color:#64748b;font-size:11px;margin-top:2px}
+  .doc{text-align:right}.doc h1{margin:0;font-size:20px}.doc .sub{color:#64748b;font-size:11px;margin-top:4px}
+  h2{font-size:14px;margin:26px 0 8px;padding-bottom:5px;border-bottom:1px solid #e2e8f0;color:#1e3a8a}
+  h3{font-size:12px;margin:16px 0 6px;color:#334155}
+  p.note{color:#64748b;font-size:11px;margin:4px 0 10px}
+  table{width:100%;border-collapse:collapse;margin:6px 0 10px}
+  th{background:#f1f5f9;text-align:right;padding:6px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#475569;border-bottom:1px solid #e2e8f0}
+  td{padding:6px 8px;border-bottom:1px solid #eef2f7;text-align:right;font-variant-numeric:tabular-nums}
+  th.l,td.l{text-align:left}
+  tr:nth-child(even) td{background:#fafbfc}
+  .kpis{display:flex;gap:10px;margin:10px 0 4px;flex-wrap:wrap}
+  .kpi{flex:1;min-width:120px;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;background:#f8fafc}
+  .kv{font-size:17px;font-weight:800}.kl{font-size:10px;color:#64748b;margin-top:2px}
+  .ft{margin-top:26px;color:#94a3b8;font-size:10px;border-top:1px solid #eef2f7;padding-top:10px}
+  @media print{h2{page-break-after:avoid}table{page-break-inside:avoid}.sec{page-break-inside:avoid}}
+  </style></head><body>
+  <div class="top"><div class="co">${esc2(COMPANY.name)}<small>${esc2(COMPANY.tagline||'')}</small></div>
+    <div class="doc"><h1>Statistical Analysis</h1><div class="sub">Generated ${now.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})} ${now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})} · by ${esc2(COMPANY.user)}</div></div></div>
+  <p class="note">A descriptive statistical report across sales, procurement, projects, inventory and tenders. Figures are computed live from current records; the monthly analysis covers the trailing 12 months.</p>
+
+  <div class="sec"><h2>1. Executive summary</h2>
+  <div class="kpis">${kpi('Total invoiced',M(invTot))}${kpi('Collected',M(collected))}${kpi('Outstanding',M(outstanding))}${kpi('Procurement spend',M(poTot))}</div>
+  <div class="kpis">${kpi('Contract value',M(cvTot))}${kpi('Actual cost',M(actTot))}${kpi('Portfolio margin',cvTot?(((cvTot-actTot)/cvTot)*100).toFixed(1)+'%':'–')}${kpi('Inventory value',M(invTotVal))}</div>
+  <div class="kpis">${kpi('Quote win rate',quotes.length?pct(quotesWon,quotes.length)+'%':'–')}${kpi('Tender win rate',decided?pct(wonT,decided)+'%':'–')}${kpi('Projects over budget',overBudget+' / '+projs.length)}${kpi('Low-stock items',lowCt)}</div></div>
+
+  <div class="sec"><h2>2. Descriptive statistics — monthly series (12 months)</h2>
+  <p class="note">n = 12 monthly observations per metric. CV = coefficient of variation (std dev ÷ mean), a measure of volatility.</p>
+  <table><thead><tr><th class="l">Metric</th><th>Total</th><th>Mean/mo</th><th>Median</th><th>Min</th><th>Max</th><th>Std dev</th><th>CV</th></tr></thead><tbody>${seriesStatRows}</tbody></table></div>
+
+  <div class="sec"><h2>3. Transaction-level distribution</h2>
+  <p class="note">Statistics over individual records, showing typical and extreme transaction sizes.</p>
+  <table><thead><tr><th class="l">Population</th><th>Count</th><th>Total</th><th>Mean</th><th>Median</th><th>Min</th><th>Max</th><th>Std dev</th></tr></thead>
+  <tbody>${txStat('Invoices',invAmts)}${txStat('Purchase orders',poAmts)}${txStat('Cost entries',entAmts)}</tbody></table></div>
+
+  <div class="sec"><h2>4. Sales &amp; billing</h2>
+  <p class="note">Collection rate ${pct(collected,invTot)}% · Quotation win rate ${quotes.length?pct(quotesWon,quotes.length):0}% (${quotesWon} of ${quotes.length}).</p>
+  <h3>Revenue concentration by client</h3>
+  <table><thead><tr><th class="l">Client</th><th>Invoiced</th><th>Share</th></tr></thead><tbody>${clientRows}</tbody></table></div>
+
+  <div class="sec"><h2>5. Procurement</h2>
+  <p class="note">${pos.length} purchase orders · ${reqs.length} material requests · total committed ${M(poTot)}.</p>
+  <h3>Spend concentration by vendor</h3>
+  <table><thead><tr><th class="l">Vendor</th><th>Spend</th><th>Share</th></tr></thead><tbody>${vendorRows}</tbody></table></div>
+
+  <div class="sec"><h2>6. Projects &amp; job cost</h2>
+  <p class="note">Margin % across projects — mean ${marginStat.mean.toFixed(1)}%, median ${marginStat.median.toFixed(1)}%, std dev ${marginStat.sd.toFixed(1)}%. ${overBudget} project(s) over budget.</p>
+  <table><thead><tr><th class="l">Project</th><th>Contract</th><th>Actual</th><th>Margin</th><th>Margin %</th><th>Spent %</th></tr></thead><tbody>${projRows}</tbody></table></div>
+
+  <div class="sec"><h2>7. Inventory (ABC — value concentration)</h2>
+  <p class="note">Total stock value ${M(invTotVal)} across ${itemVals.length} stocked items. Top items ranked by value, with cumulative share.</p>
+  <table><thead><tr><th class="l">Item</th><th class="l">Code</th><th>On hand</th><th>Value</th><th>Share</th><th>Cumulative</th></tr></thead><tbody>${abcRows||'<tr><td colspan="6" class="l">No stock on hand.</td></tr>'}</tbody></table></div>
+
+  <div class="sec"><h2>8. Tenders / bidding</h2>
+  <p class="note">Win rate ${decided?pct(wonT,decided):0}% of decided bids. Submitted bid value — mean ${M(bidStat.mean)}, median ${M(bidStat.median)}, std dev ${M(bidStat.sd)}.</p>
+  <table><thead><tr><th class="l">Status</th><th>Count</th></tr></thead><tbody>${tStatusRows}</tbody></table></div>
+
+  <div class="sec"><h2>9. Monthly invoiced — trend</h2>${bars}</div>
+
+  <div class="sec"><h2>10. Monthly series (full matrix)</h2>
+  <div style="overflow-x:auto"><table style="font-size:10px"><thead><tr><th class="l">Metric</th>${monthCols}</tr></thead><tbody>${monthBody}</tbody></table></div></div>
+
+  <div class="ft">${esc2(COMPANY.name)} · Statistical analysis generated by Qualtech OS · ${now.toISOString().slice(0,10)} · Figures are management information, not audited financial statements.</div>
+  <script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>`;
+
+  const w=window.open('','_blank');
+  if(!w){ toast('Allow pop-ups to generate the PDF'); return; }
+  w.document.write(html); w.document.close();
+  toast('Statistical report ready — use “Save as PDF” in the print dialog');
+}
+
+/* ============================================================
+   VENDORS — list + full per-vendor history (POs across procurement,
+   inventory and billing; goods receipts; quotations; items supplied).
+   ============================================================ */
+let vView='list', curVendorId=null;
+function goVendors(v){ vView=v; renderView(); window.scrollTo(0,0); }
+function openVendor(id){ curVendorId=id; vView='profile'; renderView(); window.scrollTo(0,0); }
+const poValueOf=po=>(po.lines||[]).reduce((s,l)=>s+(+l.qty||0)*(+l.rate||0),0);
+/** gather everything linked to one vendor across every module */
+function vendorHistory(id){
+  const v=vendor(id);
+  const name=v?v.name:id;
+  const procPOs=(typeof MR!=='undefined'?MR.pos:[]).filter(p=>p.vendorId===id);
+  const invPOs=(state.purchaseOrders||[]).filter(p=>p.vendorId===id);
+  const billPOs=((typeof BILL!=='undefined'?BILL.docs:[])||[]).filter(d=>d.type==='vpo'&&(d.partyId===id||d.party===name));
+  const mrQuotes=[]; (typeof MR!=='undefined'?MR.requests:[]).forEach(r=>(r.quotes||[]).forEach(q=>{ if(q.vendorId===id) mrQuotes.push({r,q}); }));
+  const tQuotes=[]; (typeof TDR!=='undefined'?TDR.tenders:[]).forEach(t=>(t.quotes||[]).forEach(q=>{ if(q.vendorId===id) tQuotes.push({t,q}); }));
+  const grns=[]; procPOs.forEach(p=>(p.receipts||[]).forEach(rc=>grns.push({p,rc})));
+  return {v,name,procPOs,invPOs,billPOs,mrQuotes,tQuotes,grns};
+}
+/** open a project's full view (job-cost summary + all its tabs incl. Documents) */
+function openProjectFull(pid){ if(typeof setCurProject==='function') setCurProject(pid); else { view='jobcost'; renderSidebar(); renderView(); window.scrollTo(0,0); } }
+/** group a vendor's supply by project: value, orders and products delivered to each */
+function vendorProjectSupply(h){
+  const T=d=>(typeof billTotals==='function')?billTotals(d).total:0;
+  const reqs=(typeof MR!=='undefined'?MR.requests:[])||[];
+  const map: Record<string,{value:number;pos:number;items:Record<string,{qty:number;val:number;name:string}>}>={};
+  const ensure=pid=>map[pid]||(map[pid]={value:0,pos:0,items:{}});
+  h.procPOs.forEach(p=>{ const r=reqs.find(x=>x.id===p.mrId); const pid=r?r.projectId:null; if(!pid) return; const m=ensure(pid); m.value+=poValueOf(p); m.pos++;
+    ((p.lines||[]) as any[]).forEach(l=>{ if(!l.code) return; const it=m.items[l.code]||(m.items[l.code]={qty:0,val:0,name:(item(l.code)||{}).name||l.desc||l.code}); it.qty+=(+l.qty||0); it.val+=(+l.qty||0)*(+l.rate||0); }); });
+  const projById=(typeof jcr!=='undefined'?jcr.projects:[])||[];
+  h.billPOs.forEach(d=>{ let pid=d.projectId; if(!pid && d.poNumber){ const p=projById.find(x=>x.jobCode===d.poNumber); if(p) pid=p.id; } if(!pid) return; const m=ensure(pid); m.value+=T(d); m.pos++;
+    (d.lines||[]).forEach(l=>{ const key='b:'+(l.desc||''); const it=m.items[key]||(m.items[key]={qty:0,val:0,name:l.desc||'—'}); it.qty+=(+l.qty||0); it.val+=(+l.qty||0)*(+l.rate||0); }); });
+  return map;
+}
 function vendorsHTML(){
-  return `<div class="page-hero"><div class="ph-img"></div><div class="ph-grad"></div><div class="ph-body"><div class="ph-eyebrow">Vendors</div><h1>Vendors</h1><p>Suppliers used for purchase orders.</p></div></div>
-    <div class="panel"><table><thead><tr><th>Vendor</th><th>GSTIN</th><th>Phone</th><th class="r">Open POs</th></tr></thead>
-    <tbody>${state.vendors.map(v=>{const open=state.purchaseOrders.filter(p=>p.vendorId===v.id&&p.status!=='Received').length;return `<tr><td class="mat"><b>${esc(v.name)}</b></td><td class="code">${v.gstin}</td><td>${v.phone}</td><td class="num">${open}</td></tr>`;}).join('')}</tbody></table></div>`;
+  if(vView==='profile' && vendor(curVendorId)) return vendorProfileHTML(curVendorId);
+  const T=d=>(typeof billTotals==='function')?billTotals(d).total:0;
+  const rows=state.vendors.map(v=>{
+    const h=vendorHistory(v.id);
+    const spend=h.procPOs.reduce((s,p)=>s+poValueOf(p),0)+h.invPOs.reduce((s,p)=>s+poValueOf(p),0)+h.billPOs.reduce((s,d)=>s+T(d),0);
+    const poCount=h.procPOs.length+h.invPOs.length+h.billPOs.length;
+    const open=h.procPOs.filter(p=>!['Received','Cancelled'].includes(p.status)).length+h.invPOs.filter(p=>p.status!=='Received').length;
+    const dates=[...h.procPOs,...h.invPOs,...h.billPOs].map(x=>x.date).filter(Boolean).sort();
+    const last=dates.length?dates[dates.length-1]:'—';
+    return `<tr class="drill" onclick="openVendor('${jsid(v.id)}')">
+      <td class="mat"><b>${esc(v.name)}</b><div class="t-cmp-src">${esc(v.id)}</div></td>
+      <td class="code">${esc(v.gstin)}</td><td>${esc(v.phone)}</td>
+      <td class="r">${poCount}</td><td class="r">${open?`<span style="color:var(--blue);font-weight:700">${open}</span>`:'0'}</td>
+      <td class="r b">${money(spend)}</td><td>${esc(last)}</td>
+      <td class="r"><span class="ac-row-go">${svg(IC.arrow)}</span></td></tr>`;
+  }).join('');
+  return `<div class="page-hero"><div class="ph-img"></div><div class="ph-grad"></div><div class="ph-body"><div class="ph-eyebrow">Vendors</div><h1>Vendors</h1><p>Suppliers across procurement, inventory and billing — click any vendor for their full history.</p></div></div>
+    <div class="panel"><div class="inv-head"><h2>All vendors</h2><span class="tag" style="margin-left:auto">${state.vendors.length}</span></div>
+    <div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>Vendor</th><th>GSTIN</th><th>Phone</th><th class="r">POs</th><th class="r">Open</th><th class="r">Total spend</th><th>Last order</th><th></th></tr></thead>
+    <tbody>${rows||'<tr class="empty-row"><td colspan="8">No vendors.</td></tr>'}</tbody></table></div></div>`;
+}
+function vendorProfileHTML(id){
+  const T=d=>(typeof billTotals==='function')?billTotals(d).total:0;
+  const h=vendorHistory(id); const v=h.v;
+  const spend=h.procPOs.reduce((s,p)=>s+poValueOf(p),0)+h.invPOs.reduce((s,p)=>s+poValueOf(p),0)+h.billPOs.reduce((s,d)=>s+T(d),0);
+  const poCount=h.procPOs.length+h.invPOs.length+h.billPOs.length;
+  const open=h.procPOs.filter(p=>!['Received','Cancelled'].includes(p.status)).length+h.invPOs.filter(p=>p.status!=='Received').length;
+  // goods received value
+  let grnVal=0; h.procPOs.forEach(p=>(p.receipts||[]).forEach(rc=>(rc.lines||[]).forEach(rl=>{ const ln=(p.lines||[]).find(l=>l.code===rl.code); grnVal+=(+rl.qty||0)*(ln?+ln.rate||0:0); })));
+  const quotesGiven=h.mrQuotes.length+h.tQuotes.length;
+  const quotesWon=h.mrQuotes.filter(x=>x.q.selected).length+h.tQuotes.filter(x=>x.q.selected).length;
+  // items supplied (code-based POs)
+  const itemAgg: Record<string,{qty:number;val:number;orders:number;lastRate:number;name:string}>={};
+  [...h.procPOs,...h.invPOs].forEach(p=>((p.lines||[]) as any[]).forEach(l=>{ const c=l.code; if(!c) return; const a=itemAgg[c]||(itemAgg[c]={qty:0,val:0,orders:0,lastRate:0,name:(item(c)||{}).name||l.desc||c}); a.qty+=(+l.qty||0); a.val+=(+l.qty||0)*(+l.rate||0); a.orders++; a.lastRate=+l.rate||a.lastRate; }));
+  const items=Object.entries(itemAgg).sort((a,b)=>b[1].val-a[1].val);
+
+  const badgeMR=s=>(typeof mrBadge==='function')?mrBadge(s==='Open'?'PO Raised':s==='Partially Received'?'Partially Delivered':s==='Received'?'Delivered':s):esc(s);
+  const kpi=(l,v,c?)=>`<div class="loc-card" style="cursor:default"><div class="lc-qty"${c?` style="color:${c}"`:''}>${v}</div><div class="lc-sub" style="margin-top:8px">${esc(l)}</div></div>`;
+  const sec=(title,count,inner)=>`<div class="panel" style="margin-top:16px"><div class="inv-head"><h2>${title}</h2><span class="tag" style="margin-left:auto">${count}</span></div>${inner}</div>`;
+
+  const procRows=h.procPOs.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(p=>{
+    const recd=(p.lines||[]).reduce((s,l)=>s+(+l.recdQty||0),0), ord=(p.lines||[]).reduce((s,l)=>s+(+l.qty||0),0);
+    return `<tr class="drill" onclick="go('procurement');openMr('${jsid(p.mrId)}')"><td class="c">${esc(p.id)}</td><td>${esc(p.mrId||'—')}</td><td>${esc(p.date||'')}</td><td class="r">${money(poValueOf(p))}</td><td class="r">${ord?Math.round(recd/ord*100):0}%</td><td>${badgeMR(p.status)}</td></tr>`;
+  }).join('')||'<tr class="empty-row"><td colspan="6">No procurement POs.</td></tr>';
+
+  const invRows=h.invPOs.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(p=>
+    `<tr><td class="c">${esc(p.id)}</td><td>${esc(p.date||'')}</td><td>${esc(locName(p.deliverTo)||'—')}</td><td class="r">${money(poValueOf(p))}</td><td>${esc(p.status)}</td></tr>`
+  ).join('')||'<tr class="empty-row"><td colspan="5">No inventory POs.</td></tr>';
+
+  const billRows=h.billPOs.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(d=>
+    `<tr class="drill" onclick="billPrint('${jsid(d.id)}')"><td><a class="bcd-no">${esc(d.number)}</a></td><td>${esc(d.subject||d.poNumber||'—')}</td><td>${esc(d.date||'')}</td><td class="r b">${money(T(d))}</td><td>${(typeof billBadge==='function')?billBadge(d.status):esc(d.status)}</td></tr>`
+  ).join('')||'<tr class="empty-row"><td colspan="5">No vendor POs raised in billing.</td></tr>';
+
+  const grnRows=h.grns.slice().sort((a,b)=>(b.rc.date||'').localeCompare(a.rc.date||'')).map(({p,rc})=>{
+    const val=(rc.lines||[]).reduce((s,rl)=>{ const ln=(p.lines||[]).find(l=>l.code===rl.code); return s+(+rl.qty||0)*(ln?+ln.rate||0:0); },0);
+    return `<tr><td>${esc(rc.grnNo||'—')}</td><td>${esc(p.id)}</td><td>${esc(rc.date||'')}</td><td class="r">${(rc.lines||[]).reduce((s,l)=>s+(+l.qty||0),0)} unit(s)</td><td class="r b">${money(val)}</td></tr>`;
+  }).join('')||'<tr class="empty-row"><td colspan="5">No goods receipts recorded.</td></tr>';
+
+  const quoteRows=[
+    ...h.mrQuotes.map(({r,q})=>`<tr><td>Material request</td><td>${esc(r.id)}</td><td class="mat">${esc((item(q.code)||{}).name||q.code)}</td><td class="r">${money(q.rate)}</td><td>${q.selected?'<span class="t-badge" style="color:#15803d;background:#dcfce7">Selected</span>':'—'}</td></tr>`),
+    ...h.tQuotes.map(({t,q})=>`<tr><td>Tender</td><td>${esc(t.id)}</td><td class="mat">${esc(q.item)}</td><td class="r">${money(q.price)}</td><td>${q.selected?'<span class="t-badge" style="color:#15803d;background:#dcfce7">Selected</span>':'—'}</td></tr>`)
+  ].join('')||'<tr class="empty-row"><td colspan="5">No quotations on record.</td></tr>';
+
+  const itemRows=items.map(([c,a])=>`<tr><td class="mat"><b>${esc(a.name)}</b></td><td class="c">${esc(c)}</td><td class="r">${num(a.qty)}</td><td class="r">${a.orders}</td><td class="r">${money(a.lastRate)}</td><td class="r b">${money(a.val)}</td></tr>`).join('')||'<tr class="empty-row"><td colspan="6">No item-level orders.</td></tr>';
+
+  return `<div style="margin-bottom:14px"><button class="btn ghost sm" onclick="goVendors('list')">${svg('<path d="M15 18l-6-6 6-6"/>')} All vendors</button></div>
+    <div class="panel" style="margin-bottom:16px"><div class="jc-proj">
+      <div class="jc-ic">${svg(IC.vendors)}</div>
+      <div class="jc-pmeta"><div class="jc-pname">${esc(v.name)} <span class="tag">${esc(v.id)}</span></div>
+        <div class="jc-pfacts"><span><b>GSTIN</b> ${esc(v.gstin||'—')}</span><span><b>Phone</b> ${esc(v.phone||'—')}</span><span><b>Supplier win rate</b> ${quotesGiven?Math.round(quotesWon/quotesGiven*100):0}%</span></div>
+      </div></div></div>
+    <div class="loc-row" style="grid-template-columns:repeat(4,1fr)">
+      ${kpi('Total spend',money(spend))}${kpi('Purchase orders',poCount)}${kpi('Open POs',open,open?'var(--blue)':'var(--green)')}${kpi('Goods received',money(grnVal),'var(--green)')}</div>
+
+    ${(()=>{ const sup=vendorProjectSupply(h); const ids=Object.keys(sup).sort((a,b)=>sup[b].value-sup[a].value);
+      const blocks=ids.map(pid=>{ const p=(typeof jcr!=='undefined'?jcr.projects:[]).find(x=>x.id===pid); const m=sup[pid];
+        const itemRows=Object.entries(m.items).sort((a,b)=>b[1].val-a[1].val).map(([k,it])=>`<tr><td class="mat"><b>${esc(it.name)}</b></td><td class="r">${num(it.qty)}</td><td class="r b">${money(it.val)}</td></tr>`).join('')||'<tr class="empty-row"><td colspan="3">—</td></tr>';
+        return `<div style="border:1px solid var(--line);border-radius:12px;margin:12px 0;overflow:hidden">
+          <div class="drill" onclick="openProjectFull('${jsid(pid)}')" style="display:flex;align-items:center;gap:12px;padding:13px 16px;cursor:pointer">
+            <span class="jc-ic" style="width:36px;height:36px;flex:none">${svg(IC.jobcost)}</span>
+            <div style="flex:1;min-width:0"><div style="font-weight:700">${esc(p?p.name:pid)} <span class="tag">${esc(p?p.jobCode:'')}</span></div>
+              <div class="t-cmp-src">${m.pos} order(s) · ${Object.keys(m.items).length} product(s) supplied · click to open the project</div></div>
+            <div style="font-weight:800;flex:none">${money(m.value)}</div><span class="ac-row-go">${svg(IC.arrow)}</span></div>
+          <div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>Product supplied to this project</th><th class="r">Qty</th><th class="r">Value</th></tr></thead><tbody>${itemRows}</tbody></table></div></div>`;
+      }).join('')||'<div style="padding:16px 20px;color:var(--muted)">No project-linked supply yet. Procurement POs link via their material request; billing vendor POs link via the project selected on the document.</div>';
+      return sec('Projects supplied',ids.length,`<div style="padding:4px 16px 14px">${blocks}</div>`);
+    })()}
+
+    ${sec('Procurement purchase orders',h.procPOs.length,`<div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>PO</th><th>Against MR</th><th>Date</th><th class="r">Value</th><th class="r">Received</th><th>Status</th></tr></thead><tbody>${procRows}</tbody></table></div>`)}
+    ${sec('Inventory purchase orders',h.invPOs.length,`<div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>PO</th><th>Date</th><th>Deliver to</th><th class="r">Value</th><th>Status</th></tr></thead><tbody>${invRows}</tbody></table></div>`)}
+    ${sec('Vendor POs (billing)',h.billPOs.length,`<div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>Doc no.</th><th>Subject</th><th>Date</th><th class="r">Value</th><th>Status</th></tr></thead><tbody>${billRows}</tbody></table></div>`)}
+    ${sec('Goods receipts (GRN)',h.grns.length,`<div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>GRN</th><th>PO</th><th>Date</th><th class="r">Qty</th><th class="r">Value</th></tr></thead><tbody>${grnRows}</tbody></table></div>`)}
+    ${sec('Quotations given',quotesGiven,`<div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>Source</th><th>Ref</th><th>Item</th><th class="r">Quoted rate</th><th>Outcome</th></tr></thead><tbody>${quoteRows}</tbody></table></div>`)}
+    ${sec('Items supplied',items.length,`<div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>Item</th><th>Code</th><th class="r">Total qty</th><th class="r">Orders</th><th class="r">Last rate</th><th class="r">Total value</th></tr></thead><tbody>${itemRows}</tbody></table></div>`)}`;
 }
 /* ============================================================
    COMPANY DASHBOARD — overview across tenders, projects,
@@ -650,6 +1386,114 @@ function miniSpark(s,color){
   const area=d+` L ${(w-pad).toFixed(1)} ${h-pad} L ${pad} ${h-pad} Z`;
   const id='sg'+(++_sparkN);
   return `<svg class="ov-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".3"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs><path d="${area}" fill="url(#${id})"/><path d="${d}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+
+/* ============================================================
+   ACTION CENTER — one rules engine over every module. No external
+   services: every alert is derived from data already in the app.
+   ============================================================ */
+/** materials at/below reorder (low) or at zero (out), with on-hand across all locations */
+function lowStockScan(){
+  const out: {it:Item;oh:number}[]=[], low: {it:Item;oh:number}[]=[];
+  (state.items||[]).filter(it=>it.type!=='equipment').forEach(it=>{
+    let oh=0; (state.locations||[]).forEach(l=>oh+=Math.max(0,onHand(it.code,l.id)));
+    if(oh<=0) out.push({it,oh}); else if(oh<=(it.reorder||0)) low.push({it,oh});
+  });
+  return {out,low};
+}
+/** Returns every current alert across modules, each: {sev,cat,title,detail,nav} */
+function collectAlerts(){
+  const A: {sev:'critical'|'warning'|'info';cat:string;title:string;detail:string;nav:string}[]=[];
+  const add=(sev,cat,title,detail,nav)=>A.push({sev,cat,title,detail,nav});
+  const today=nowDate();
+  const dTo=d=>Math.round((new Date(d).getTime()-new Date(today).getTime())/864e5);
+  try{
+    const {out,low}=lowStockScan();
+    out.forEach(x=>add('critical','Inventory','Out of stock — '+x.it.name, x.it.code+' · 0 on hand (reorder at '+num(x.it.reorder)+')','inventory'));
+    low.forEach(x=>add('warning','Inventory','Low stock — '+x.it.name, x.it.code+' · '+num(x.oh)+' on hand, reorder at '+num(x.it.reorder),'inventory'));
+  }catch{}
+  try{ if(typeof MR!=='undefined'){
+    (MR.requests||[]).filter(r=>typeof mrOverdue==='function'&&mrOverdue(r)).forEach(r=>
+      add('critical','Procurement','Overdue material request — '+r.id, (projName(r.projectId))+' · needed by '+r.neededBy,'procurement'));
+    (MR.pos||[]).filter(p=>typeof poOverdue==='function'&&poOverdue(p)).forEach(p=>
+      add('warning','Procurement','Overdue purchase order — '+p.id, 'Expected '+p.expectedDate+' · '+(vendor(p.vendorId)?vendor(p.vendorId).name:p.vendorId),'procurement'));
+  }}catch{}
+  try{ if(typeof TDR!=='undefined'){
+    (TDR.tenders||[]).filter(t=>!t.archived && !['Won','Lost','Withdrawn'].includes(t.status) && t.deadline).forEach(t=>{
+      const d=dTo(t.deadline);
+      if(d<0) add('critical','Bidding','Tender deadline passed — '+t.name, 'Due '+t.deadline+' · status '+t.status,'tenders');
+      else if(d<=7) add('warning','Bidding','Tender due in '+d+' day'+(d===1?'':'s')+' — '+t.name, 'Deadline '+t.deadline+' · '+t.status,'tenders');
+    });
+  }}catch{}
+  try{ if(typeof BILL!=='undefined'){
+    (BILL.docs||[]).filter(d=>d.type==='invoice' && d.dueDate && d.status!=='Paid' && d.dueDate<today).forEach(d=>{
+      const t=(typeof billTotals==='function')?billTotals(d).total:0;
+      add('critical','Billing','Invoice overdue — '+d.number, (d.party||'')+' · '+money(t)+' · due '+d.dueDate,'billing');
+    });
+  }}catch{}
+  try{ if(typeof jcr!=='undefined'){
+    (jcr.projects||[]).filter(p=>!p.archived && p.start && p.finish && p.status!=='Completed').forEach(p=>{
+      const s=new Date(p.start).getTime(), f=new Date(p.finish).getTime(), n=new Date(today).getTime();
+      if(f<=s) return;
+      const schedPct=Math.round((n-s)/(f-s)*100);
+      const spent=projActual(p.id), cv=+p.originalCV||0;
+      const spentPct=cv?Math.round(spent/cv*100):0;
+      if(cv && spentPct>schedPct+10) add('warning','Projects','Budget ahead of schedule — '+p.name, spentPct+'% of contract spent vs '+Math.max(0,schedPct)+'% time elapsed','jobcost');
+      if(cv && spent>cv) add('critical','Projects','Over budget — '+p.name, money(spent)+' spent vs '+money(cv)+' contract','jobcost');
+    });
+  }}catch{}
+  const rank={critical:0,warning:1,info:2};
+  return A.sort((a,b)=>rank[a.sev]-rank[b.sev]);
+}
+function alertCount(){ try{ return collectAlerts().length; }catch{ return 0; } }
+
+function actionCenterHTML(){
+  const alerts=collectAlerts();
+  const n=s=>alerts.filter(a=>a.sev===s).length;
+  const {out,low}=lowStockScan();
+  const reorderCodes=[...out,...low].map(x=>x.it.code);
+  const sevMeta={critical:['#b91c1c','#fee2e2','Critical'],warning:['#b45309','#fef3c7','Needs attention'],info:['#0369a1','#e0f2fe','For info']};
+  const dot=s=>`<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${sevMeta[s][0]};flex:none"></span>`;
+  const kpi=(v,l,c)=>`<div class="loc-card" style="cursor:default"><div class="lc-qty" style="color:${c}">${v}</div><div class="lc-sub" style="margin-top:8px">${l}</div></div>`;
+
+  const cats=[...new Set(alerts.map(a=>a.cat))];
+  const groups=cats.map(cat=>{
+    const items=alerts.filter(a=>a.cat===cat);
+    const rows=items.map(a=>`<div class="ac-row" onclick="go('${a.nav}')">
+      <div class="ac-row-l">${dot(a.sev)}<div><div class="ac-row-title">${esc(a.title)}</div><div class="ac-row-sub">${esc(a.detail)}</div></div></div>
+      <span class="ac-row-go">${svg(IC.arrow)}</span></div>`).join('');
+    return `<div class="panel" style="margin-top:16px"><div class="inv-head"><h2>${esc(cat)}</h2><span class="tag" style="margin-left:auto">${items.length}</span></div>
+      <div class="ac-list">${rows}</div></div>`;
+  }).join('');
+
+  const empty=`<div class="panel" style="margin-top:16px;padding:48px;text-align:center">
+    <div style="font-size:40px">✅</div><div style="font-weight:700;margin-top:10px">All clear</div>
+    <div style="color:var(--muted);font-size:13px;margin-top:4px">No stock, procurement, bidding, billing or budget items need attention right now.</div></div>`;
+
+  const reorderCTA=reorderCodes.length?`<div class="panel" style="margin-top:16px;display:flex;align-items:center;gap:14px;padding:16px 20px">
+      <span class="ov-kpi-ic" style="flex:none">${svg(IC.consume)}</span>
+      <div style="flex:1"><div style="font-weight:700">${reorderCodes.length} item${reorderCodes.length===1?'':'s'} at or below reorder level</div>
+      <div style="color:var(--muted);font-size:13px">Auto-build a material request with suggested quantities to top them back up.</div></div>
+      <button class="btn" onclick="actionReorder()">${svg(IC.plus)} Create reorder request</button></div>`:'';
+
+  return `<div class="page-hero"><div class="ph-img"></div><div class="ph-grad"></div><div class="ph-body"><div class="ph-eyebrow">Action Center</div><h1>What needs your attention</h1><p>Live across inventory, procurement, bidding, billing and project budgets — no setup, updates automatically.</p></div></div>
+    <div class="loc-row" style="grid-template-columns:repeat(4,1fr)">
+      ${kpi(alerts.length,'Open items','var(--ink)')}
+      ${kpi(n('critical'),'Critical',sevMeta.critical[0])}
+      ${kpi(n('warning'),'Needs attention',sevMeta.warning[0])}
+      ${kpi(reorderCodes.length,'To reorder','var(--blue)')}
+    </div>
+    ${reorderCTA}
+    ${alerts.length?groups:empty}`;
+}
+/** Auto-draft a material request from everything at/below reorder level. */
+function actionReorder(){
+  const {out,low}=lowStockScan();
+  const picks=[...out,...low];
+  if(!picks.length) return toast('Nothing to reorder — all stock is above reorder level');
+  const lines=picks.map(x=>{ const suggest=Math.max(x.it.reorder||0, (x.it.reorder||0)*2-x.oh); return {code:x.it.code, qty:Math.max(1,Math.round(suggest)), note:'Auto reorder — '+num(x.oh)+' on hand'}; });
+  go('procurement');
+  if(typeof openReorderRequest==='function') openReorderRequest(lines);
 }
 
 function dashboardHTML(){
@@ -860,7 +1704,7 @@ function setJcTab(t){ jcTab=t; renderView(); window.scrollTo(0,0); }
 function setJcBucket(b){ jcBucket=b; renderView(); }
 function jobCostHTML(){
   const p=curProject();
-  const tabs=[['summary','Project Summary'],['jcl','Job Cost Ledger (JCL)'],['jcr','Job Cost Report (JCR)'],['materials','Materials'],['labour','Labour'],['consumables','Consumables'],['overheads','Overheads']];
+  const tabs=[['summary','Project Summary'],['jcl','Job Cost Ledger (JCL)'],['jcr','Job Cost Report (JCR)'],['materials','Materials'],['labour','Labour'],['consumables','Consumables'],['overheads','Overheads'],['documents','Documents']];
   let body='';
   if(jcTab==='summary') body=jcSummary();
   else if(jcTab==='jcl') body=jcLedger();
@@ -869,6 +1713,7 @@ function jobCostHTML(){
   else if(jcTab==='labour') body=jcCostLedger('Labour');
   else if(jcTab==='consumables') body=jcConsumables();
   else if(jcTab==='overheads') body=jcOverheads();
+  else if(jcTab==='documents') body=jcDocuments();
   const activeProjects=(jcr.projects||[]).filter(x=>!x.archived);
   return `
   <div class="page-top" style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px"><div><h1>Job Cost</h1><p>Project cost reporting (JCR &amp; JCL) linked to inventory consumption.</p></div>
@@ -896,7 +1741,7 @@ function jobCostHTML(){
   </div></div>
   <div class="panel">
     <div class="tabs" style="overflow-x:auto">${tabs.map(t=>`<button class="tab ${jcTab===t[0]?'active':''}" onclick="setJcTab('${t[0]}')">${t[1]}</button>`).join('')}</div>
-    ${jcTab!=='summary'?`<div class="jc-toolbar">${jcActBtns()}</div>`:''}
+    ${(jcTab!=='summary'&&jcTab!=='documents')?`<div class="jc-toolbar">${jcActBtns()}</div>`:''}
     <div style="padding:4px 2px">${body}</div>
   </div>`;
 }
@@ -964,7 +1809,7 @@ function jcLedger(){
   const rows=codes.map(c=>{
     const cells=JCR_CATS.map(cat=>codeCat(c.code,cat,jcBucket));
     const tot=cells.reduce((s,v)=>s+v,0);
-    return `<tr class="drill" onclick="jcDrill('${c.code}')"><td class="c">${esc(c.code)}</td><td>${esc(c.desc)}</td>${cells.map(v=>`<td class="r">${v?jcNum(v):'—'}</td>`).join('')}<td class="r b">${jcNum(tot)}</td><td class="r" style="width:24px;color:var(--dim)">${svg(IC.drill)}</td></tr>`;
+    return `<tr class="drill" onclick="jcDrill('${jsid(c.code)}')"><td class="c">${esc(c.code)}</td><td>${esc(c.desc)}</td>${cells.map(v=>`<td class="r">${v?jcNum(v):'—'}</td>`).join('')}<td class="r b">${jcNum(tot)}</td><td class="r" style="width:24px;color:var(--dim)">${svg(IC.drill)}</td></tr>`;
   }).join('');
   const totals=JCR_CATS.map(cat=>catTotalB(cat,jcBucket));
   const grand=totals.reduce((s,v)=>s+v,0);
@@ -985,9 +1830,9 @@ function jcDrill(code){
 /* ---- Materials / Labour cost ledgers ---- */
 function jcEntryActs(e){
   return `<div class="jc-row-acts">
-    <button title="Edit" onclick="openCostEntry(null,'${e.id}')">${svg(IC.edit)}</button>
-    <button title="Reverse" onclick="reverseEntry('${e.id}')">${svg(IC.xfer)}</button>
-    <button title="Archive" class="del" onclick="archiveEntry('${e.id}')">${svg(IC.trash)}</button></div>`;
+    <button title="Edit" onclick="openCostEntry(null,'${jsid(e.id)}')">${svg(IC.edit)}</button>
+    <button title="Reverse" onclick="reverseEntry('${jsid(e.id)}')">${svg(IC.xfer)}</button>
+    <button title="Archive" class="del" onclick="archiveEntry('${jsid(e.id)}')">${svg(IC.trash)}</button></div>`;
 }
 function jcCostLedger(category){
   const es=jcr.entries.filter(e=>e.category===category&&!e.archived&&e.projectId===jcr.currentProjectId).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
@@ -1011,10 +1856,62 @@ function jcConsumables(){
 function jcOverheads(){
   const oh=projOH();
   const t=oh.reduce((a,o)=>({l:a.l+(Number(o.uptoLast)||0),m:a.m+(Number(o.thisMonth)||0),e:a.e+(Number(o.etc)||0),r:a.r+(Number(o.revised)||0)}),{l:0,m:0,e:0,r:0});
-  const rows=oh.map(o=>`<tr><td class="c">${esc(o.code)}</td><td class="mat">${esc(o.desc)}</td><td class="r">${jcMoney(o.uptoLast)}</td><td class="r">${jcMoney(o.thisMonth)}</td><td class="r">${jcMoney((Number(o.uptoLast)||0)+(Number(o.thisMonth)||0))}</td><td class="r">${jcMoney(o.etc)}</td><td class="r">${jcMoney(o.revised)}</td><td><div class="jc-row-acts"><button title="Edit" onclick="openOverhead('${o.code}')">${svg(IC.edit)}</button></div></td></tr>`).join('');
+  const rows=oh.map(o=>`<tr><td class="c">${esc(o.code)}</td><td class="mat">${esc(o.desc)}</td><td class="r">${jcMoney(o.uptoLast)}</td><td class="r">${jcMoney(o.thisMonth)}</td><td class="r">${jcMoney((Number(o.uptoLast)||0)+(Number(o.thisMonth)||0))}</td><td class="r">${jcMoney(o.etc)}</td><td class="r">${jcMoney(o.revised)}</td><td><div class="jc-row-acts"><button title="Edit" onclick="openOverhead('${jsid(o.code)}')">${svg(IC.edit)}</button></div></td></tr>`).join('');
   return `<div class="jc-sub">Overheads (OH Abstract) — Site Overhead heads</div>
     <div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>Cost</th><th>Description of Item</th><th class="r">Upto Last Month</th><th class="r">This Month</th><th class="r">JSD (to date)</th><th class="r">Estimate to Complete</th><th class="r">Revised Estimate</th><th></th></tr></thead>
     <tbody>${rows}<tr class="tot"><td></td><td>Total</td><td class="r">${jcMoney(t.l)}</td><td class="r">${jcMoney(t.m)}</td><td class="r">${jcMoney(t.l+t.m)}</td><td class="r">${jcMoney(t.e)}</td><td class="r">${jcMoney(t.r)}</td><td></td></tr></tbody></table></div>`;
+}
+
+/* ---- jump into another module from the project's Documents hub ---- */
+function docOpenTender(id){ go('tenders'); openTender(id); }
+function docOpenMr(id){ go('procurement'); openMr(id); }
+
+/* ---- Documents — every tender, material request, PO & billing doc tied to this project ---- */
+function jcDocuments(){
+  const p=curProject();
+  const tenders=(typeof TDR!=='undefined'?(TDR.tenders||[]):[]).filter(t=>t.projectId===p.id);
+  const reqs=(typeof MR!=='undefined'?(MR.requests||[]):[]).filter(r=>r.projectId===p.id);
+  const reqIds=new Set(reqs.map(r=>r.id));
+  const pos=(typeof MR!=='undefined'?(MR.pos||[]):[]).filter(po=>reqIds.has(po.mrId));
+  const bills=(typeof BILL!=='undefined'?(BILL.docs||[]):[]).filter(d=>d.projectId?d.projectId===p.id:d.poNumber===p.jobCode);
+
+  const section=(title,icon,count,addBtn,tableHtml)=>`<div class="panel" style="margin-top:16px">
+    <div class="inv-head"><h2>${svg(icon)} ${title}</h2><span class="tag" style="margin-left:8px">${count}</span>
+      <div style="margin-left:auto">${addBtn||''}</div></div>
+    ${tableHtml}</div>`;
+
+  const tenderRows=tenders.map(t=>`<tr class="drill" onclick="docOpenTender('${t.id}')">
+    <td class="c">${esc(t.id)}</td><td><b>${esc(t.name)}</b></td><td>${esc(t.client||'')}</td>
+    <td>${statusBadge(t.status)}</td><td class="r">${jcMoney(t.estValue||0)}</td></tr>`).join('')
+    ||`<tr class="empty-row"><td colspan="5">No tenders linked to this project.</td></tr>`;
+
+  const reqRows=reqs.map(r=>`<tr class="drill" onclick="docOpenMr('${r.id}')">
+    <td class="c">${esc(r.id)}</td><td>${esc(locName(r.site)||'—')}</td><td>${esc(r.requestedBy||'')}</td>
+    <td class="r">${(r.lines||[]).length}</td><td>${esc(r.neededBy||'—')}</td><td>${mrBadge(r.status)}</td></tr>`).join('')
+    ||`<tr class="empty-row"><td colspan="6">No material requests raised for this project.</td></tr>`;
+
+  const poRows=pos.map(po=>{ const v=vendor(po.vendorId);
+    return `<tr class="drill" onclick="docOpenMr('${po.mrId}')">
+      <td class="c">${esc(po.id)}</td><td><b>${esc(v?v.name:po.vendorId)}</b></td><td>${esc(po.mrId||'—')}</td>
+      <td class="r">${jcMoney((po.lines||[]).reduce((s,l)=>s+(+l.qty||0)*(+l.rate||0),0))}</td>
+      <td>${esc(po.expectedDate||'—')}</td><td>${mrBadge(po.status==='Open'?'PO Raised':po.status==='Partially Received'?'Partially Delivered':po.status==='Received'?'Delivered':po.status)}</td></tr>`; }).join('')
+    ||`<tr class="empty-row"><td colspan="6">No purchase orders raised against this project.</td></tr>`;
+
+  const billRows=bills.slice().sort((a,b)=>(b.date||b.createdAt||'').localeCompare(a.date||a.createdAt||'')).map(d=>{ const t=billTotals(d);
+    return `<tr class="drill" onclick="billPrint('${d.id}')">
+      <td><a class="bcd-no">${esc(d.number)}</a></td><td>${billTypeBadge(d.type)}</td><td>${esc(d.party||'—')}</td>
+      <td>${esc(d.date||'')}</td><td class="r b">${money(t.total)}</td><td>${billBadge(d.status)}</td></tr>`; }).join('')
+    ||`<tr class="empty-row"><td colspan="6">No quotations, POs or invoices linked to this project.</td></tr>`;
+
+  return `<div class="jc-sub">All documents for ${esc(p.name)} (${esc(p.jobCode)})</div>
+    ${section('Tenders',IC.tenders,tenders.length,'',
+      `<div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>Tender</th><th>Name</th><th>Client</th><th>Status</th><th class="r">Est. Value</th></tr></thead><tbody>${tenderRows}</tbody></table></div>`)}
+    ${section('Material Requests',IC.consume,reqs.length,`<button class="btn ghost sm" onclick="go('procurement');openNewRequest()">${svg(IC.plus)} New Request</button>`,
+      `<div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>Req ID</th><th>Site</th><th>Requested by</th><th class="r">Lines</th><th>Needed by</th><th>Status</th></tr></thead><tbody>${reqRows}</tbody></table></div>`)}
+    ${section('Purchase Orders',IC.po,pos.length,'',
+      `<div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>PO</th><th>Vendor</th><th>Against</th><th class="r">Value</th><th>Expected</th><th>Status</th></tr></thead><tbody>${poRows}</tbody></table></div>`)}
+    ${section('Quotations, POs &amp; Invoices',IC.billing,bills.length,`<button class="btn ghost sm" onclick="go('billing')">${svg(IC.plus)} New Billing Document</button>`,
+      `<div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>Doc no.</th><th>Type</th><th>Party</th><th>Date</th><th class="r">Amount</th><th>Status</th></tr></thead><tbody>${billRows}</tbody></table></div>`)}`;
 }
 
 /* ---- Job Cost Report (JCR) — BOQ-level, actuals from the ledger ---- */
@@ -1025,7 +1922,7 @@ function jcReport(){
     const boqAmt=(b.boqQty!=null&&b.boqRate!=null)?b.boqQty*b.boqRate:null;
     const act=codeTotal(b.code,'this'); const varc=boqAmt!=null?boqAmt-act:null;
     if(boqAmt!=null){ tBoq+=boqAmt; anyBoq=true; } tAct+=act;
-    return `<tr><td class="c">${esc(b.boqNo)}</td><td class="c">${esc(b.code)}</td><td class="mat"><b>${esc(b.desc)}</b></td><td>${esc(b.unit||'')}</td><td class="r">${b.boqQty!=null?jcNum(b.boqQty):'—'}</td><td class="r">${b.boqRate!=null?jcMoney(b.boqRate):'—'}</td><td class="r">${boqAmt!=null?jcMoney(boqAmt):'—'}</td><td class="r b">${jcMoney(act)}</td><td class="r" style="color:${varc!=null?(varc>=0?'var(--green)':'var(--red)'):'var(--dim)'}">${varc!=null?jcMoney(varc):'—'}</td><td><div class="jc-row-acts"><button title="Edit BOQ" onclick="openBoq('${b.id}')">${svg(IC.edit)}</button><button class="del" title="Archive" onclick="archiveBoq('${b.id}')">${svg(IC.trash)}</button></div></td></tr>`;
+    return `<tr><td class="c">${esc(b.boqNo)}</td><td class="c">${esc(b.code)}</td><td class="mat"><b>${esc(b.desc)}</b></td><td>${esc(b.unit||'')}</td><td class="r">${b.boqQty!=null?jcNum(b.boqQty):'—'}</td><td class="r">${b.boqRate!=null?jcMoney(b.boqRate):'—'}</td><td class="r">${boqAmt!=null?jcMoney(boqAmt):'—'}</td><td class="r b">${jcMoney(act)}</td><td class="r" style="color:${varc!=null?(varc>=0?'var(--green)':'var(--red)'):'var(--dim)'}">${varc!=null?jcMoney(varc):'—'}</td><td><div class="jc-row-acts"><button title="Edit BOQ" onclick="openBoq('${jsid(b.id)}')">${svg(IC.edit)}</button><button class="del" title="Archive" onclick="archiveBoq('${jsid(b.id)}')">${svg(IC.trash)}</button></div></td></tr>`;
   }).join('')||`<tr class="empty-row"><td colspan="10">No BOQ items — use “Add BOQ Item” to enter the contract BOQ.</td></tr>`;
   return `<div class="jc-sub">Job Cost Report — BOQ vs actual cost (JSD) by cost code</div>
     <div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>BOQ No</th><th>Cost Code</th><th>Description (as per BOQ)</th><th>Unit</th><th class="r">BOQ Qty</th><th class="r">BOQ Rate</th><th class="r">BOQ Amount</th><th class="r">Actual (JSD)</th><th class="r">Variance</th><th></th></tr></thead>
@@ -1083,7 +1980,7 @@ function openBoq(editId){
     </div></div>
     <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitBoq(${b?`'${b.id}'`:'null'})">${b?'Save':'Add BOQ item'}</button></div></div>`);
 }
-function submitBoq(editId){ const no=val('bq-no'), desc=val('bq-desc'); if(!no||!desc) return toast('BOQ No and description required'); const rec={boqNo:no,code:val('bq-code'),desc,unit:val('bq-unit'),boqQty:parseFloat(val('bq-qty'))||null,boqRate:parseFloat(val('bq-rate'))||null,revQty:parseFloat(val('bq-rqty'))||null}; if(editId){ Object.assign(jcr.boq.find(x=>x.id===editId),rec); jcAudit('edit','BOQ '+editId); toast('BOQ updated'); } else { const id=jcNextId('BQ-',jcr.boq); jcr.boq.push(Object.assign({id,projectId:jcr.currentProjectId,archived:false},rec)); jcAudit('add','BOQ '+id); toast('BOQ item added'); } jcSave(); closeModal(); renderView(); }
+function submitBoq(editId){ const no=val('bq-no'), desc=val('bq-desc'); if(!no||!desc) return toast('BOQ No and description required'); const rec={boqNo:no,code:val('bq-code'),desc,unit:val('bq-unit'),boqQty:parseFloat(val('bq-qty'))||null,boqRate:parseFloat(val('bq-rate'))||null,revQty:parseFloat(val('bq-rqty'))||null}; if(editId){ const ex=jcr.boq.find(x=>x.id===editId); if(!ex){ closeModal(); renderView(); return toast('That BOQ item no longer exists — it may have been removed elsewhere'); } Object.assign(ex,rec); jcAudit('edit','BOQ '+editId); toast('BOQ updated'); } else { const id=jcNextId('BQ-',jcr.boq); jcr.boq.push(Object.assign({id,projectId:jcr.currentProjectId,archived:false},rec)); jcAudit('add','BOQ '+id); toast('BOQ item added'); } jcSave(); closeModal(); renderView(); }
 function archiveBoq(id){ const b=jcr.boq.find(x=>x.id===id); if(!b) return; b.archived=!b.archived; jcAudit(b.archived?'archive':'restore','BOQ '+id); jcSave(); renderView(); }
 
 /* ---- Cost code ---- */
@@ -1094,9 +1991,9 @@ function openCostCode(editCode){
       <div class="fld"><label>Code <span class="req">*</span></label><input class="f" id="cc-code" value="${c?esc(c.code):''}" ${c?'readonly':''} placeholder="e.g. 8000"></div>
       <div class="fld col2"><label>Description <span class="req">*</span></label><input class="f" id="cc-desc" value="${c?esc(c.desc):''}"></div>
     </div></div>
-    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitCostCode(${c?`'${c.code}'`:'null'})">${c?'Save':'Add cost code'}</button></div></div>`);
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitCostCode(${c?`'${jsid(c.code)}'`:'null'})">${c?'Save':'Add cost code'}</button></div></div>`);
 }
-function submitCostCode(editCode){ const code=val('cc-code'), desc=val('cc-desc'); if(!code||!desc) return toast('Code and description required'); if(!editCode && jcr.costCodes.some(x=>x.code===code)) return toast('That code already exists'); if(editCode){ jcr.costCodes.find(x=>x.code===editCode).desc=desc; jcAudit('edit','Cost code '+editCode); } else { jcr.costCodes.push({code,desc}); jcAudit('add','Cost code '+code); } jcSave(); closeModal(); renderView(); toast('Cost code saved'); }
+function submitCostCode(editCode){ const code=val('cc-code'), desc=val('cc-desc'); if(!code||!desc) return toast('Code and description required'); if(!editCode && !CODE_RE.test(code)) return toast('Code can use letters, numbers, spaces and . _ - / only'); if(!editCode && jcr.costCodes.some(x=>x.code===code)) return toast('That code already exists'); if(editCode){ const ex=jcr.costCodes.find(x=>x.code===editCode); if(!ex){ closeModal(); renderView(); return toast('That cost code no longer exists — it may have been removed elsewhere'); } ex.desc=desc; jcAudit('edit','Cost code '+editCode); } else { jcr.costCodes.push({code,desc}); jcAudit('add','Cost code '+code); } jcSave(); closeModal(); renderView(); toast('Cost code saved'); }
 
 /* ---- Overhead head ---- */
 function openOverhead(editCode){
@@ -1110,9 +2007,9 @@ function openOverhead(editCode){
       <div class="fld"><label>Estimate to Complete</label><input class="f" id="oh-etc" type="number" step="any" value="${o&&o.etc!=null?o.etc:''}"></div>
       <div class="fld"><label>Revised Estimate</label><input class="f" id="oh-rev" type="number" step="any" value="${o&&o.revised!=null?o.revised:''}"></div>
     </div></div>
-    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitOverhead(${o?`'${o.code}'`:'null'})">${o?'Save':'Add overhead'}</button></div></div>`);
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitOverhead(${o?`'${jsid(o.code)}'`:'null'})">${o?'Save':'Add overhead'}</button></div></div>`);
 }
-function submitOverhead(editCode){ const code=val('oh-code'), desc=val('oh-desc'); if(!code||!desc) return toast('Code and description required'); const rec={desc,uptoLast:parseFloat(val('oh-last'))||0,thisMonth:parseFloat(val('oh-month'))||0,etc:parseFloat(val('oh-etc'))||0,revised:parseFloat(val('oh-rev'))||0}; const pid=jcr.currentProjectId; if(editCode){ Object.assign(jcr.overheads.find(x=>x.code===editCode&&x.projectId===pid),rec); jcAudit('edit','Overhead '+editCode); } else { if(jcr.overheads.some(x=>x.code===code&&x.projectId===pid)) return toast('Code exists'); jcr.overheads.push(Object.assign({code,projectId:pid},rec)); jcAudit('add','Overhead '+code); } jcSave(); closeModal(); renderView(); toast('Overhead saved'); }
+function submitOverhead(editCode){ const code=val('oh-code'), desc=val('oh-desc'); if(!code||!desc) return toast('Code and description required'); if(!editCode && !CODE_RE.test(code)) return toast('Code can use letters, numbers, spaces and . _ - / only'); const rec={desc,uptoLast:parseFloat(val('oh-last'))||0,thisMonth:parseFloat(val('oh-month'))||0,etc:parseFloat(val('oh-etc'))||0,revised:parseFloat(val('oh-rev'))||0}; const pid=jcr.currentProjectId; if(editCode){ const ex=jcr.overheads.find(x=>x.code===editCode&&x.projectId===pid); if(!ex){ closeModal(); renderView(); return toast('That overhead no longer exists — it may have been removed elsewhere'); } Object.assign(ex,rec); jcAudit('edit','Overhead '+editCode); } else { if(jcr.overheads.some(x=>x.code===code&&x.projectId===pid)) return toast('Code exists'); jcr.overheads.push(Object.assign({code,projectId:pid},rec)); jcAudit('add','Overhead '+code); } jcSave(); closeModal(); renderView(); toast('Overhead saved'); }
 
 /* ---- reporting period + audit + export ---- */
 function setReporting(v){ if(v){ jcr.reporting=v; jcSave(); renderView(); } }
@@ -1209,6 +2106,29 @@ function reset(){ if(confirm('Reset all inventory & job-cost demo data to the se
 
 /* ---------- boot ---------- */
 /* defer first paint until all module scripts (tender/procure/billing) have defined their globals */
-function boot(){ initTheme(); renderSidebar(); renderTopbar(); renderView(); }
+/* ---------- global safety net ---------- */
+/* Any uncaught error or rejected promise anywhere in the app surfaces as a
+   quiet toast instead of silently breaking a click or leaving a blank screen. */
+let _lastErrAt=0;
+function reportGlobalError(label, detail){
+  const now=Date.now();
+  if(now-_lastErrAt<1500) return;   // don't spam if an error repeats
+  _lastErrAt=now;
+  console.error(label, detail);
+  try{ toast('Something didn’t go through — please try again'); }catch{}
+}
+if(typeof window!=='undefined'){
+  window.addEventListener('error', e=>reportGlobalError('Uncaught error:', e.error||e.message));
+  window.addEventListener('unhandledrejection', e=>reportGlobalError('Unhandled promise rejection:', e.reason));
+}
+
+function boot(){
+  try{ initTheme(); renderSidebar(); renderTopbar(); renderView(); }
+  catch(err){
+    console.error('boot failed:', err);
+    const el=document.getElementById('app');
+    if(el) el.innerHTML=renderErrorHTML('startup', err);
+  }
+}
 // when sync.ts is in charge it calls boot() after every script has loaded
 if(!window.qtDeferBoot){ if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot(); }

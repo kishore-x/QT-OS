@@ -24,6 +24,10 @@ import { mkdirSync } from 'node:fs';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { timingSafeEqual } from 'node:crypto';
+import { gzip } from 'node:zlib';
+import { promisify } from 'node:util';
+
+const gzipAsync = promisify(gzip);
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT) || 3000;
@@ -31,14 +35,26 @@ const DB_FILE = resolve(ROOT, process.env.DB_FILE || 'data/qualtech.db');
 const PASSWORD = process.env.QT_PASSWORD || '';
 const MAX_BODY = 25 * 1024 * 1024;
 
-/** The data blocks the app saves. Must match the *_LS keys in src/. */
-const STORE_KEYS = new Set([
-  'qualtech-inv-v3',      // inventory  (app.ts)
-  'qualtech-jcr-v3',      // job cost   (app.ts)
-  'qualtech-tender-v2',   // tenders    (tender.ts)
-  'qualtech-mr-v1',       // procurement(procure.ts)
-  'qualtech-billing-v2',  // billing    (billing.ts)
-]);
+/** The data blocks the app saves, and the array fields each must contain.
+    A save is rejected unless it is a plain object with these fields as arrays —
+    this stops a malformed or malicious payload from corrupting a shared store
+    and breaking the app for every user. Must match the *_LS keys in src/. */
+const STORE_SHAPES: Record<string, string[]> = {
+  'qualtech-inv-v3':     ['movements', 'items', 'locations', 'vendors'],  // app.ts
+  'qualtech-jcr-v3':     ['projects', 'entries', 'costCodes'],            // app.ts
+  'qualtech-tender-v2':  ['tenders'],                                     // tender.ts
+  'qualtech-mr-v1':      ['requests', 'pos'],                             // procure.ts
+  'qualtech-billing-v2': ['docs'],                                        // billing.ts
+};
+const STORE_KEYS = new Set(Object.keys(STORE_SHAPES));
+
+/** True only for a plain {…} object carrying every required array field. */
+function validStorePayload(key: string, data: unknown): data is Record<string, unknown> {
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return false;
+  const req = STORE_SHAPES[key] || [];
+  for (const f of req) if (!Array.isArray((data as Record<string, unknown>)[f])) return false;
+  return true;
+}
 
 /* ---------- database ---------- */
 mkdirSync(dirname(DB_FILE), { recursive: true });
@@ -102,6 +118,25 @@ function send(res: ServerResponse, status: number, body: string, type = 'applica
 }
 const sendJson = (res: ServerResponse, status: number, obj: unknown) => send(res, status, JSON.stringify(obj));
 
+/* Compress larger text responses (JS/CSS/JSON) when the client supports it.
+   Cuts the ~480KB of app code to ~130KB over the wire — the main win on a
+   remote/cloud connection. Tiny responses are sent as-is (not worth the CPU). */
+const COMPRESSIBLE = /^(text\/|application\/(json|javascript|xml)|image\/svg)/;
+const acceptsGzip = (req: IncomingMessage) => /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''));
+async function sendBody(req: IncomingMessage, res: ServerResponse, status: number, body: Buffer, contentType: string, cacheControl: string) {
+  const headers: Record<string, string> = { 'Content-Type': contentType, 'Cache-Control': cacheControl, 'Vary': 'Accept-Encoding' };
+  if (body.length > 1024 && acceptsGzip(req) && COMPRESSIBLE.test(contentType)) {
+    try {
+      const gz = await gzipAsync(body);
+      headers['Content-Encoding'] = 'gzip';
+      res.writeHead(status, headers);
+      return res.end(gz);
+    } catch { /* fall through to uncompressed */ }
+  }
+  res.writeHead(status, headers);
+  res.end(body);
+}
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((ok, fail) => {
     const chunks: Buffer[] = []; let size = 0;
@@ -133,15 +168,20 @@ const MIME: Record<string, string> = {
 // only these are public; src/, server/, data/ etc. are never served
 const PUBLIC = ['index.html', 'css/', 'js/'];
 
-async function serveStatic(pathname: string, res: ServerResponse) {
+async function serveStatic(req: IncomingMessage, pathname: string, res: ServerResponse) {
   const rel = normalize(decodeURIComponent(pathname)).replace(/^[/\\]+/, '') || 'index.html';
   if (rel.includes('..') || !PUBLIC.some(p => rel === p || rel.startsWith(p))) return send(res, 404, 'Not found', 'text/plain');
   const file = join(ROOT, rel);
   try {
     const s = await stat(file);
     if (!s.isFile()) return send(res, 404, 'Not found', 'text/plain');
-    res.writeHead(200, { 'Content-Type': MIME[extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
-    res.end(await readFile(file));
+    const type = MIME[extname(file)] || 'application/octet-stream';
+    // js/ and css/ are cache-busted with ?b=NN in index.html, so they're safe to
+    // cache forever: repeat visits re-fetch nothing until the build number changes.
+    // index.html itself must revalidate so a new build is always picked up.
+    const versioned = rel.startsWith('js/') || rel.startsWith('css/');
+    const cache = versioned ? 'public, max-age=31536000, immutable' : 'no-cache';
+    await sendBody(req, res, 200, await readFile(file), type, cache);
   } catch {
     send(res, 404, 'Not found', 'text/plain');
   }
@@ -158,19 +198,24 @@ const server = createServer(async (req, res) => {
     const path = url.pathname;
 
     if (path === '/api/stores' && req.method === 'GET') {
-      const out: Record<string, { version: number; data: unknown; updatedAt: string }> = {};
-      for (const r of qAll.all() as Row[]) out[r.key] = { version: r.version, data: JSON.parse(r.data), updatedAt: r.updated_at };
-      return sendJson(res, 200, out);
+      // Build the JSON from the already-serialized rows (data is stored as JSON
+      // text), so we skip a parse+re-stringify of the whole dataset on every load.
+      const parts = (qAll.all() as Row[]).map(r =>
+        `${JSON.stringify(r.key)}:{"version":${r.version},"data":${r.data},"updatedAt":${JSON.stringify(r.updated_at)}}`);
+      return sendBody(req, res, 200, Buffer.from('{' + parts.join(',') + '}', 'utf8'), 'application/json; charset=utf-8', 'no-store');
     }
 
     const m = path.match(/^\/api\/stores\/([\w-]+)$/);
     if (m && req.method === 'PUT') {
       const key = m[1];
       if (!STORE_KEYS.has(key)) return sendJson(res, 404, { error: 'unknown store' });
-      let body: { baseVersion?: unknown; data?: unknown };
+      let body: { baseVersion?: unknown; data?: unknown } | null;
       try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'invalid JSON or body too large' }); }
-      if (typeof body.baseVersion !== 'number' || body.data == null || typeof body.data !== 'object') {
+      if (body === null || typeof body !== 'object' || Array.isArray(body) || typeof body.baseVersion !== 'number') {
         return sendJson(res, 400, { error: 'expected { baseVersion: number, data: object }' });
+      }
+      if (!validStorePayload(key, body.data)) {
+        return sendJson(res, 422, { error: 'payload does not match the expected shape for ' + key });
       }
       const r = saveStore(key, body.baseVersion, JSON.stringify(body.data));
       return r.ok ? sendJson(res, 200, { version: r.version })
@@ -181,7 +226,7 @@ const server = createServer(async (req, res) => {
     if (path === '/favicon.ico') { res.writeHead(204); return res.end(); }
     if (path.startsWith('/api/')) return sendJson(res, 404, { error: 'not found' });
     if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed', 'text/plain');
-    return serveStatic(path, res);
+    return serveStatic(req, path, res);
   } catch (e) {
     console.error(e);
     if (!res.headersSent) sendJson(res, 500, { error: 'server error' });

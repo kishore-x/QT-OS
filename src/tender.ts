@@ -29,7 +29,7 @@ const T_STATUS_COLORS={
 
 function tLoad(){
   try{ const r=localStorage.getItem(T_LS); if(r){ const d=JSON.parse(r); d.tenders=d.tenders||[]; d.audit=d.audit||[]; return d; } }catch{}
-  return { tenders:[tSeedTender(), ...tExtraSeedTenders()], audit:[], counter:4 };
+  return { tenders:[tSeedTender(), ...tExtraSeedTenders()], audit:[], counter:5 };
 }
 function tSave(){ try{ localStorage.setItem(T_LS, JSON.stringify(TDR)); }catch{} syncPush(T_LS, TDR); }
 let TDR: TenderState = tLoad();
@@ -116,6 +116,20 @@ function tExtraSeedTenders(){
       submittedValue:56800000, submittedDate:'2026-09-24', docs:[], approvals:[{at:'2026-09-22T10:00:00Z',by:COMPANY.user,decision:'Approved',note:''}],
       history:[h('2026-08-15T09:00:00Z','','Draft','Received'),h('2026-09-24T12:00:00Z','Approved for Submission','Submitted','Bid submitted'),h('2026-10-10T09:00:00Z','Submitted','Lost','Lost to L1 by ~4%')],
       projectId:null, jobCode:null, awardDate:null, acceptedValue:null, archived:false },
+    { id:'TDR-005', name:'Lakeside Commercial Tower — Structural Package', client:'Lakeside Developers',
+      clientContact:'tenders@lakesidedev.in', clientRef:'LD/OMR/2026-11', desc:'RCC frame &amp; structural works for a 2-tower commercial complex, OMR.',
+      receivedDate:'2026-07-02', deadline:'2026-07-28', owner:COMPANY.user, status:'Won',
+      estValue:150000000, siteAddress:'OMR, Navalur, Chennai', expStart:'2026-07-20', expFinish:'2027-10-31',
+      tenderType:'Open — Lump Sum', specialConditions:'Retention 5%, mobilisation advance 10%.', notes:'Won on technical strength + repeat-client discount — converted to project MC 041.',
+      boq:[ tBoqLine('1',pick(2,'RCC Work'),'Cum',5200,{matRate:6250,labRate:1420}), tBoqLine('2',pick(1,'Steel'),'MT',1120,{matRate:67200,labRate:3750}) ],
+      quotes:[ {id:'QT-1',vendorId:'V-02',item:'TMT Bar 16mm',unit:'MT',price:67500,validity:'7 days',delivery:'10 days',terms:'Net 15',selected:true} ],
+      pricing:{overheadPct:7, contingencyPct:3, markupPct:10, taxPct:18},
+      versions:[{ver:1,at:'2026-07-15T12:00:00Z',by:COMPANY.user,direct:0,totalCost:0,bidValue:152000000,profit:0,margin:0,note:'SUBMITTED'}],
+      submittedValue:152000000, submittedDate:'2026-07-15',
+      docs:[{id:'DOC-1',name:'Lakeside-Bid-Final.pdf',type:'Submitted proposal',at:'2026-07-15T12:00:00Z'}],
+      approvals:[{at:'2026-07-12T10:00:00Z',by:COMPANY.user,decision:'Approved',note:'Approved at 10% markup'}],
+      history:[h('2026-07-02T09:00:00Z','','Draft','Received'),h('2026-07-10T09:00:00Z','Draft','Estimation in Progress','Estimation'),h('2026-07-14T09:00:00Z','Estimation in Progress','Approved for Submission','Approved'),h('2026-07-15T12:00:00Z','Approved for Submission','Submitted','Bid submitted ₹15.2 Cr'),h('2026-07-18T09:00:00Z','Submitted','Won','LOI received — awarded')],
+      projectId:'MC041', jobCode:'MC 041', awardDate:'2026-07-18', acceptedValue:152000000, archived:false },
   ];
 }
 function tBoqLine(no, cc, unit, qty, rates){
@@ -164,7 +178,7 @@ function statusBadge(s){ const c=T_STATUS_COLORS[s]||['#475569','#e2e8f0']; retu
 function tenderHTML(){
   if(tView==='workspace' && curTender()) return tenderWorkspace();
   if(tView!=='list') return tenderDashboard();   // hero dashboard is self-contained
-  const tab=(v,l)=>`<button class="seg-btn ${tView===v?'on':''}" onclick="goTender('${v}')">${l}</button>`;
+  const tab=(v,l)=>`<button class="seg-btn ${tView===v?'on':''}" onclick="goTender('${jsid(v)}')">${l}</button>`;
   const head=`<div class="page-top" style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px">
       <div><h1>Tendering &amp; Bidding</h1><p>Opportunities, estimation &amp; bids — a won tender auto-initializes a full project.</p></div>
       <div style="display:flex;gap:8px;align-items:center"><div class="seg">${tab('dashboard','Dashboard')}${tab('list','All Tenders')}</div>
@@ -293,7 +307,7 @@ function tenderDashboard(){
   </div>
 
   <div class="d3-strip">
-    ${metrics.map(m=>`<div class="d3-metric drill" onclick="tGoList('${m[4]}')" title="View ${esc(m[0])}">
+    ${metrics.map(m=>`<div class="d3-metric drill" onclick="tGoList('${jsid(m[4])}')" title="View ${esc(m[0])}">
       <div class="d3-m-top"><span class="d3-m-num">${m[2]}</span><span class="d3-m-ic">${svg(m[1])}</span></div>
       <div class="d3-m-lab">${m[0]}</div>${d3Trend(mcount(m[3],thisKey),mcount(m[3],lastKey))}</div>`).join('')}
   </div>
@@ -321,7 +335,7 @@ function tenderDashboard(){
     <div class="d3-right">
       <div class="panel db-card">
         <div class="db-ch"><div class="db-ch-t">Upcoming submission deadlines</div><a class="tb-viewall" onclick="goTender('list')">View all ${svg(TBI.arrow)}</a></div>
-        <div class="d3-dl-list">${upcoming.length?upcoming.map(t=>{ const d=daysTo(t.deadline); const dt=new Date(t.deadline); return `<div class="d3-dl drill" onclick="openTender('${t.id}')">
+        <div class="d3-dl-list">${upcoming.length?upcoming.map(t=>{ const d=daysTo(t.deadline); const dt=new Date(t.deadline); return `<div class="d3-dl drill" onclick="openTender('${jsid(t.id)}')">
           <div class="d3-datechip"><span>${TB_MON[dt.getMonth()].toUpperCase()}</span><b>${dt.getDate()}</b></div>
           <div class="d3-dl-mid"><div class="d3-dl-name">${esc(t.name)}</div><div class="d3-dl-client">${esc(t.client||'')}</div></div>
           <div class="d3-dl-right"><div class="d3-dl-days ${d<0?'t-over':d<=5?'t-soon':''}">${d<0?(-d)+'d':d+'d'}</div>${statusBadge(t.status)}</div></div>`;}).join(''):'<div class="jc-hint" style="padding:16px 20px">No open deadlines.</div>'}</div>
@@ -346,10 +360,10 @@ function tenderList(){
   const q=tListQ.trim().toLowerCase();
   if(q) ts=ts.filter(t=>[t.id,t.name,t.client,t.owner].some(x=>String(x||'').toLowerCase().includes(q)));
   const opts=['all','Draft','Under Estimation','Pending Approval','Submitted','Under Negotiation','Won','Lost','Withdrawn','Approved for Submission'].map(s=>`<option value="${s}" ${tListStatus===s?'selected':''}>${s==='all'?'All statuses':s}</option>`).join('');
-  const rows=ts.map(t=>{ const c=tCostBreak(t); return `<tr class="drill" onclick="openTender('${t.id}')">
+  const rows=ts.map(t=>{ const c=tCostBreak(t); return `<tr class="drill" onclick="openTender('${jsid(t.id)}')">
     <td class="c">${esc(t.id)}</td><td><b>${esc(t.name)}</b></td><td>${esc(t.client||'—')}</td><td>${esc(t.owner||'—')}</td>
     <td>${esc(t.deadline||'—')}</td><td class="r">${t.estValue?jcMoney(t.estValue):'—'}</td><td class="r">${c.bidValue?jcMoney(c.bidValue):'—'}</td>
-    <td>${statusBadge(t.status)}</td><td>${t.projectId?`<button class="btn ghost sm" onclick="event.stopPropagation();openProjectFromTender('${t.id}')">Open project →</button>`:''}</td></tr>`;}).join('')
+    <td>${statusBadge(t.status)}</td><td>${t.projectId?`<button class="btn ghost sm" onclick="event.stopPropagation();openProjectFromTender('${jsid(t.id)}')">Open project →</button>`:''}</td></tr>`;}).join('')
     ||`<tr class="empty-row"><td colspan="9">No tenders match. Click “Create New Tender”.</td></tr>`;
   return `<div class="panel">
     <div class="inv-head"><h2>Tender Register</h2>
@@ -421,10 +435,10 @@ function tenderWorkspace(){
   else if(tTab==='history') body=twHistory(t);
   const canConvert=['Submitted','Under Negotiation'].includes(t.status) && !t.projectId;
   const actions=`<div style="display:flex;gap:8px;flex-wrap:wrap">
-    ${t.projectId?`<button class="btn" onclick="openProjectFromTender('${t.id}')">${svg(IC.arrow)} Open Project ${esc(t.jobCode||'')}</button>`:''}
-    ${canConvert?`<button class="btn" style="background:var(--green)" onclick="openConvert('${t.id}')">${svg(IC.check)} Mark as Won / Convert to Project</button>`:''}
-    ${(T_TRANSITIONS[t.status]||[]).length?`<button class="btn ghost" onclick="openStatus('${t.id}')">${svg(IC.flag)} ${t.status==='Lost'||t.status==='Withdrawn'?'Reopen':'Update Status'}</button>`:''}
-    <button class="btn ghost" onclick="openEditTender('${t.id}')">${svg(IC.edit)} Edit</button></div>`;
+    ${t.projectId?`<button class="btn" onclick="openProjectFromTender('${jsid(t.id)}')">${svg(IC.arrow)} Open Project ${esc(t.jobCode||'')}</button>`:''}
+    ${canConvert?`<button class="btn" style="background:var(--green)" onclick="openConvert('${jsid(t.id)}')">${svg(IC.check)} Mark as Won / Convert to Project</button>`:''}
+    ${(T_TRANSITIONS[t.status]||[]).length?`<button class="btn ghost" onclick="openStatus('${jsid(t.id)}')">${svg(IC.flag)} ${t.status==='Lost'||t.status==='Withdrawn'?'Reopen':'Update Status'}</button>`:''}
+    <button class="btn ghost" onclick="openEditTender('${jsid(t.id)}')">${svg(IC.edit)} Edit</button></div>`;
   return `
   <div class="t-ws-top">
     <button class="t-back" onclick="goTender('list')">${svg(IC.drill)} All Tenders</button>
@@ -439,7 +453,7 @@ function tenderWorkspace(){
       <span><b>Bid value</b> ${jcMoney(c.bidValue)}</span><span><b>Exp. margin</b> ${c.margin.toFixed(1)}%</span>
     </div>
   </div>
-  <div class="seg t-seg">${tabs.map(x=>`<button class="seg-btn ${tTab===x[0]?'on':''}" onclick="setTTab('${x[0]}')">${x[1]}</button>`).join('')}</div>
+  <div class="seg t-seg">${tabs.map(x=>`<button class="seg-btn ${tTab===x[0]?'on':''}" onclick="setTTab('${jsid(x[0])}')">${x[1]}</button>`).join('')}</div>
   <div style="margin-top:14px">${body}</div>`;
 }
 
@@ -471,12 +485,12 @@ function twBoq(t,c){
     <td class="c">${esc(b.itemNo)}</td><td><b>${esc(b.desc)}</b></td><td class="c">${esc(b.code||'—')}</td><td>${esc(b.unit||'')}</td>
     <td class="r">${jcNum(b.qty)}</td><td class="r">${jcNum(b.matRate)}</td><td class="r">${jcNum(b.labRate)}</td><td class="r">${jcNum(b.subRate)}</td><td class="r">${jcNum(b.eqpRate)}</td><td class="r">${jcNum(b.otherRate)}</td>
     <td class="r b">${jcNum(tLineRate(b))}</td><td class="r b">${jcMoney(tLineAmt(b))}</td>
-    <td><div class="jc-row-acts"><button title="Edit" onclick="openTBoq('${t.id}','${b.id}')">${svg(IC.edit)}</button><button title="Remove" onclick="delTBoq('${t.id}','${b.id}')">${svg(IC.trash)}</button></div></td></tr>`).join('')
+    <td><div class="jc-row-acts"><button title="Edit" onclick="openTBoq('${jsid(t.id)}','${jsid(b.id)}')">${svg(IC.edit)}</button><button title="Remove" onclick="delTBoq('${jsid(t.id)}','${jsid(b.id)}')">${svg(IC.trash)}</button></div></td></tr>`).join('')
     ||`<tr class="empty-row"><td colspan="13">No BOQ items yet — add items, start from standard work items, or import from Excel.</td></tr>`;
   const locked=t.status==='Won';   // only an awarded tender's BOQ is frozen (it is the project's baseline)
   return `<div class="panel">
     <div class="inv-head"><h2>BOQ &amp; Cost Estimation</h2>
-      <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${locked?'<span class="jc-hint" style="padding:6px 10px">Awarded — baseline frozen in the project</span>':`<button class="btn ghost sm" onclick="addStandardItems('${t.id}')">${svg(IC.plus)} Standard work items</button><button class="btn ghost sm" onclick="openImportBoq('${t.id}')">${svg(IC.in)} Import from Excel</button><button class="btn sm" onclick="openTBoq('${t.id}')">${svg(IC.plus)} Add BOQ Item</button>`}<button class="btn ghost sm" onclick="exportTBoq('${t.id}')">Export CSV</button></div></div>
+      <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">${locked?'<span class="jc-hint" style="padding:6px 10px">Awarded — baseline frozen in the project</span>':`<button class="btn ghost sm" onclick="addStandardItems('${jsid(t.id)}')">${svg(IC.plus)} Standard work items</button><button class="btn ghost sm" onclick="openImportBoq('${jsid(t.id)}')">${svg(IC.in)} Import from Excel</button><button class="btn sm" onclick="openTBoq('${jsid(t.id)}')">${svg(IC.plus)} Add BOQ Item</button>`}<button class="btn ghost sm" onclick="exportTBoq('${jsid(t.id)}')">Export CSV</button></div></div>
     <div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>Item</th><th>Description</th><th>Code</th><th>Unit</th><th class="r">Qty</th><th class="r">Material</th><th class="r">Labour</th><th class="r">Sub</th><th class="r">Equip</th><th class="r">Other</th><th class="r">Unit rate</th><th class="r">Amount</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
     <tfoot><tr class="tot"><td colspan="11" class="r">Total estimated direct cost</td><td class="r b">${jcMoney(c.direct)}</td><td></td></tr></tfoot></table></div>
@@ -498,7 +512,7 @@ function openTBoq(tid,bid){
       <div class="fld"><label>Equipment / hire rate</label><input class="f" id="tb-eqp" type="number" step="any" value="${b?b.eqpRate:''}" oninput="tbPreview()"></div>
       <div class="fld"><label>Other direct rate</label><input class="f" id="tb-oth" type="number" step="any" value="${b?b.otherRate:''}" oninput="tbPreview()"></div>
     </div><div class="hint">${svg(IC.jobcost)}<div>Unit rate <b id="tb-rate">₹0</b> · Line amount <b id="tb-amt">₹0</b></div></div></div>
-    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitTBoq('${tid}','${bid||''}')">${b?'Save':'Add item'}</button></div></div>`);
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitTBoq('${jsid(tid)}','${jsid(bid||'')}')">${b?'Save':'Add item'}</button></div></div>`);
   tbPreview();
 }
 function tbCodeDesc(){ const sel=(document.getElementById('tb-code') as HTMLInputElement); const d=(document.getElementById('tb-desc') as HTMLInputElement); if(sel&&d&&!d.value){ const c=(jcr.costCodes||[]).find(x=>x.code===sel.value); if(c) d.value=c.desc; } }
@@ -532,7 +546,7 @@ function openImportBoq(tid){
       <div style="display:flex;justify-content:flex-end"><button class="btn ghost sm" onclick="previewImportBoq()">Preview</button></div>
       <div id="imp-preview" style="margin-top:10px"></div>
     </div>
-    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="commitImportBoq('${tid}')">Import</button></div></div>`);
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="commitImportBoq('${jsid(tid)}')">Import</button></div></div>`);
   setupDrop('imp-file','imp-data',previewImportBoq);
 }
 /* shared: read a chosen CSV file's text into a target textarea, then run a callback */
@@ -583,7 +597,7 @@ function addStandardItems(tid){
       <tbody>${standardWorkItems().map(w=>`<tr><td><b>${esc(w.desc)}</b></td><td>${esc(w.unit)}</td><td class="r">${jcNum(w.qty)}</td><td class="r">${jcNum(w.matRate)}</td><td class="r">${jcNum(w.labRate)}</td><td class="r">${jcNum(w.subRate)}</td><td class="r">${jcNum(w.eqpRate)}</td><td class="r b">${jcMoney(tLineAmt(w))}</td></tr>`).join('')}</tbody></table></div>
       <div class="hint">${svg(IC.jobcost)}<div>These are <b>illustrative</b> quantities and rates to start the estimate. They are appended to the current BOQ — adjust each quantity and rate to match the actual scope. Costs flow into the Materials / Labour / Subcontracting split automatically.</div></div>
     </div>
-    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="commitStandardItems('${tid}')">Add these ${standardWorkItems().length} items</button></div></div>`);
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="commitStandardItems('${jsid(tid)}')">Add these ${standardWorkItems().length} items</button></div></div>`);
 }
 function commitStandardItems(tid){
   const t=TDR.tenders.find(x=>x.id===tid); if(!t) return;
@@ -680,14 +694,14 @@ function deltaCell(cur, ref){ if(!ref||!cur) return '—'; const d=(cur-ref)/ref
   const c=up?'var(--red)':dn?'var(--green)':'var(--muted)'; const sign=d>0?'+':''; const arr=up?'▲':dn?'▼':'■';
   return `<span style="color:${c};font-weight:700">${arr} ${sign}${d.toFixed(1)}%</span>`; }
 function twQuotes(t){
-  const rows=(t.quotes||[]).map(q=>`<tr class="drill ${q.selected?'t-sel':''} ${cmpQuoteId===q.id?'t-cmp':''}" onclick="compareQuote('${t.id}','${q.id}')">
+  const rows=(t.quotes||[]).map(q=>`<tr class="drill ${q.selected?'t-sel':''} ${cmpQuoteId===q.id?'t-cmp':''}" onclick="compareQuote('${jsid(t.id)}','${jsid(q.id)}')">
     <td><b>${esc(vendorLabel(q))}</b></td><td>${esc(q.item||'—')}</td><td>${esc(q.unit||'')}</td><td class="r b">${jcMoney(q.price)}</td>
-    <td><div class="jc-row-acts">${q.selected?'<span class="t-pick">Selected</span>':`<button title="Select for estimate" onclick="event.stopPropagation();selectQuote('${t.id}','${q.id}')">${svg(IC.check)}</button>`}<button title="Remove" onclick="event.stopPropagation();delQuote('${t.id}','${q.id}')">${svg(IC.trash)}</button></div></td></tr>`).join('')
+    <td><div class="jc-row-acts">${q.selected?'<span class="t-pick">Selected</span>':`<button title="Select for estimate" onclick="event.stopPropagation();selectQuote('${jsid(t.id)}','${jsid(q.id)}')">${svg(IC.check)}</button>`}<button title="Remove" onclick="event.stopPropagation();delQuote('${jsid(t.id)}','${jsid(q.id)}')">${svg(IC.trash)}</button></div></td></tr>`).join('')
     ||`<tr class="empty-row"><td colspan="5">No quotations yet — import a CSV or record one.</td></tr>`;
   const cur=(t.quotes||[]).find(q=>q.id===cmpQuoteId);
   return `<div class="t-ov-grid t-cmp-grid">
     <div class="panel"><div class="inv-head"><h2>Current quotations</h2>
-      <div style="margin-left:auto;display:flex;gap:8px"><button class="btn ghost sm" onclick="openImportQuotes('${t.id}')">${svg(IC.in)} Import CSV</button><button class="btn sm" onclick="openQuote('${t.id}')">${svg(IC.plus)} Record Quotation</button></div></div>
+      <div style="margin-left:auto;display:flex;gap:8px"><button class="btn ghost sm" onclick="openImportQuotes('${jsid(t.id)}')">${svg(IC.in)} Import CSV</button><button class="btn sm" onclick="openQuote('${jsid(t.id)}')">${svg(IC.plus)} Record Quotation</button></div></div>
       <div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>Vendor</th><th>Item</th><th>Unit</th><th class="r">Quoted</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
       <div class="jc-hint" style="padding:12px 20px">${svg(IC.vendors)} Click a quotation to compare it against historical records on the right. The ✓ flags a quote for the estimate; vendors use the shared master.</div></div>
     ${cur?quoteComparePanel(cur):`<div class="panel t-cmp-empty"><div class="inv-head"><h2>Historical records</h2></div><div class="t-cmp-ph">${svg(IC.history)}<p>Select a quotation on the left to compare its price against past project rates, previous vendor quotes and the inventory master rate.</p></div></div>`}
@@ -730,7 +744,7 @@ function openQuote(tid){
       <div class="fld"><label>Delivery terms</label><input class="f" id="q-deliv" placeholder="e.g. 7 days, FOR site"></div>
       <div class="fld col2"><label>Commercial terms</label><input class="f" id="q-terms" placeholder="payment, taxes…"></div>
     </div></div>
-    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitQuote('${tid}')">Save quotation</button></div></div>`);
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitQuote('${jsid(tid)}')">Save quotation</button></div></div>`);
 }
 function submitQuote(tid){ const t=TDR.tenders.find(x=>x.id===tid); const price=parseFloat(val('q-price'))||0; if(price<=0) return toast('Enter a quoted price');
   let m=0; (t.quotes||[]).forEach(q=>{ const g=((q.id||'').match(/(\d+)$/)||[])[1]; if(g&&+g>m)m=+g; });
@@ -754,7 +768,7 @@ function openImportQuotes(tid){
       <div style="display:flex;justify-content:flex-end"><button class="btn ghost sm" onclick="previewImportQuotes()">Preview</button></div>
       <div id="qimp-preview" style="margin-top:10px"></div>
     </div>
-    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="commitImportQuotes('${tid}')">Import</button></div></div>`);
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="commitImportQuotes('${jsid(tid)}')">Import</button></div></div>`);
   setupDrop('qimp-file','qimp-data',previewImportQuotes);
 }
 function matchVendor(name){ const n=String(name||'').trim().toLowerCase(); if(!n) return null;
@@ -782,7 +796,7 @@ function twPricing(t,c){
   const ov=t.directOverride&&t.directOverride.on;
   const catCell=(l,v)=>`<tr><td>${l}${ov?' <span class="t-manual">manual</span>':''}</td><td class="r b">${v}</td></tr>`;
   return `<div class="t-ov-grid">
-    <div class="panel"><div class="inv-head"><h2>Bid build-up</h2>${locked?'':`<div style="margin-left:auto;display:flex;gap:8px"><button class="btn ghost sm" onclick="openDirectCosts('${t.id}')">${svg(IC.edit)} Edit direct costs</button><button class="btn sm" onclick="openPricing('${t.id}')">${svg(IC.edit)} Revise &amp; save version</button></div>`}</div>
+    <div class="panel"><div class="inv-head"><h2>Bid build-up</h2>${locked?'':`<div style="margin-left:auto;display:flex;gap:8px"><button class="btn ghost sm" onclick="openDirectCosts('${jsid(t.id)}')">${svg(IC.edit)} Edit direct costs</button><button class="btn sm" onclick="openPricing('${jsid(t.id)}')">${svg(IC.edit)} Revise &amp; save version</button></div>`}</div>
       <div class="tbl-scroll"><table class="jc-tbl"><tbody>
         ${catCell('Materials',jcMoney(c.matCost))}
         ${catCell('Labour',jcMoney(c.labCost))}
@@ -872,7 +886,7 @@ function openPricing(tid){ const t=TDR.tenders.find(x=>x.id===tid); const p: Par
       <div class="fld"><label>Tax %</label><input class="f" id="pr-tax" type="number" step="any" value="${p.taxPct||0}"></div>
       <div class="fld col2"><label>Version note</label><input class="f" id="pr-note" placeholder="e.g. Reduced markup after negotiation"></div>
     </div></div>
-    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitPricing('${tid}')">Save version</button></div></div>`);
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitPricing('${jsid(tid)}')">Save version</button></div></div>`);
 }
 function submitPricing(tid){ const t=TDR.tenders.find(x=>x.id===tid);
   t.pricing={ overheadPct:parseFloat(val('pr-oh'))||0, contingencyPct:parseFloat(val('pr-cont'))||0, markupPct:parseFloat(val('pr-mk'))||0, taxPct:parseFloat(val('pr-tax'))||0 };
@@ -889,7 +903,7 @@ function openDirectCosts(tid){ const t=TDR.tenders.find(x=>x.id===tid); const ca
       <div class="fld"><label>Labour (₹)</label><input class="f" id="dc-lab" type="number" step="any" value="${Math.round(cat.lab)}" oninput="dcPreview()"></div>
       <div class="fld col2"><label>Subcontracting &amp; equipment (₹)</label><input class="f" id="dc-sub" type="number" step="any" value="${Math.round(cat.subEqp)}" oninput="dcPreview()"></div>
     </div><div class="hint">${svg(IC.jobcost)}<div>Estimated direct cost <b id="dc-total">₹0</b>. ${boqN?`This overrides the figures derived from the ${boqN} BOQ line(s) — your BOQ stays intact.`:`You have no BOQ lines, so these typed figures drive the estimate.`}</div></div></div>
-    <div class="m-foot">${ov?`<button class="btn ghost" onclick="clearDirectCosts('${tid}')">Use BOQ instead</button>`:'<span></span>'}<div style="display:flex;gap:8px;margin-left:auto"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitDirectCosts('${tid}')">Save direct costs</button></div></div></div>`);
+    <div class="m-foot">${ov?`<button class="btn ghost" onclick="clearDirectCosts('${jsid(tid)}')">Use BOQ instead</button>`:'<span></span>'}<div style="display:flex;gap:8px;margin-left:auto"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitDirectCosts('${jsid(tid)}')">Save direct costs</button></div></div></div>`);
   dcPreview();
 }
 function dcPreview(){ const g=id=>parseFloat(val(id))||0; const el=document.getElementById('dc-total'); if(el) el.textContent=jcMoney(g('dc-mat')+g('dc-lab')+g('dc-sub')); }
@@ -909,14 +923,14 @@ function twApproval(t,c){
       <div class="t-ov"><span>Current status</span>${statusBadge(t.status)}</div>
       <div class="t-ov"><span>Proposed bid value</span><b>${jcMoney(c.bidValue)}</b></div>
       <div class="t-ov"><span>Expected margin</span><b>${c.margin.toFixed(1)}%</b></div>
-      ${t.status==='Estimation in Progress'?`<button class="btn" onclick="applyStatus('${t.id}','Awaiting Approval','Submitted for internal approval')">Submit estimate for approval</button>`:''}
-      ${canApprove?`<div style="display:flex;gap:8px"><button class="btn" onclick="recordApproval('${t.id}','Approved')">${svg(IC.check)} Approve for submission</button><button class="btn danger" onclick="recordApproval('${t.id}','Rejected')">${svg(IC.x)} Reject</button></div>`:''}
+      ${t.status==='Estimation in Progress'?`<button class="btn" onclick="applyStatus('${jsid(t.id)}','Awaiting Approval','Submitted for internal approval')">Submit estimate for approval</button>`:''}
+      ${canApprove?`<div style="display:flex;gap:8px"><button class="btn" onclick="recordApproval('${jsid(t.id)}','Approved')">${svg(IC.check)} Approve for submission</button><button class="btn danger" onclick="recordApproval('${jsid(t.id)}','Rejected')">${svg(IC.x)} Reject</button></div>`:''}
     </div></div>
     <div class="panel"><div class="inv-head"><h2>Bid submission</h2></div><div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px">
       ${t.submittedValue?`<div class="t-ov"><span>Submitted bid</span><b>${jcMoney(t.submittedValue)}</b></div><div class="t-ov"><span>Submitted on</span><b>${esc(t.submittedDate||'')}</b></div>`:'<div class="jc-hint">Not yet submitted.</div>'}
-      ${canSubmit?`<button class="btn" onclick="openSubmitBid('${t.id}')">${svg(IC.out)} Record bid submission</button>`:''}
-      ${t.status==='Submitted'?`<button class="btn ghost" onclick="applyStatus('${t.id}','Under Negotiation','Client negotiation started')">Move to negotiation</button>`:''}
-      ${['Submitted','Under Negotiation'].includes(t.status)?`<div style="display:flex;gap:8px"><button class="btn" style="background:var(--green)" onclick="openConvert('${t.id}')">${svg(IC.check)} Mark as Won</button><button class="btn danger" onclick="applyStatus('${t.id}','Lost','')">Mark as Lost</button></div>`:''}
+      ${canSubmit?`<button class="btn" onclick="openSubmitBid('${jsid(t.id)}')">${svg(IC.out)} Record bid submission</button>`:''}
+      ${t.status==='Submitted'?`<button class="btn ghost" onclick="applyStatus('${jsid(t.id)}','Under Negotiation','Client negotiation started')">Move to negotiation</button>`:''}
+      ${['Submitted','Under Negotiation'].includes(t.status)?`<div style="display:flex;gap:8px"><button class="btn" style="background:var(--green)" onclick="openConvert('${jsid(t.id)}')">${svg(IC.check)} Mark as Won</button><button class="btn danger" onclick="applyStatus('${jsid(t.id)}','Lost','')">Mark as Lost</button></div>`:''}
     </div></div>
     <div class="panel" style="grid-column:1/-1"><div class="inv-head"><h2>Approval history</h2></div>
       <div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>Date</th><th>By</th><th>Decision</th><th>Comment</th></tr></thead><tbody>${appr}</tbody></table></div></div>
@@ -935,7 +949,7 @@ function openSubmitBid(tid){ const t=TDR.tenders.find(x=>x.id===tid); const c=tC
       <div class="fld"><label>Submission date</label><input class="f" id="sb-date" type="date" value="${nowDate()}"></div>
       <div class="fld col2"><label>Proposal / document reference</label><input class="f" id="sb-doc" placeholder="e.g. Qualtech-Bid-TDR001.pdf"></div>
     </div><div class="hint">${svg(IC.jobcost)}<div>This locks in a submitted bid version for comparison; later pricing revisions won't overwrite it.</div></div></div>
-    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitBid('${tid}')">Submit bid</button></div></div>`);
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitBid('${jsid(tid)}')">Submit bid</button></div></div>`);
 }
 function submitBid(tid){ const t=TDR.tenders.find(x=>x.id===tid); const v=parseFloat(val('sb-val'))||0; if(v<=0) return toast('Enter the submitted bid value');
   t.submittedValue=v; t.submittedDate=val('sb-date')||nowDate(); const c=tCostBreak(t);
@@ -946,9 +960,9 @@ function submitBid(tid){ const t=TDR.tenders.find(x=>x.id===tid); const v=parseF
 
 /* ---------- Documents ---------- */
 function twDocs(t){
-  const rows=(t.docs||[]).map(d=>`<tr><td><b>${esc(d.name)}</b></td><td>${esc(d.type||'—')}</td><td>${esc((d.at||'').slice(0,10))}</td><td><div class="jc-row-acts"><button title="Remove" onclick="delDoc('${t.id}','${d.id}')">${svg(IC.trash)}</button></div></td></tr>`).join('')
+  const rows=(t.docs||[]).map(d=>`<tr><td><b>${esc(d.name)}</b></td><td>${esc(d.type||'—')}</td><td>${esc((d.at||'').slice(0,10))}</td><td><div class="jc-row-acts"><button title="Remove" onclick="delDoc('${jsid(t.id)}','${jsid(d.id)}')">${svg(IC.trash)}</button></div></td></tr>`).join('')
     ||`<tr class="empty-row"><td colspan="4">No documents recorded.</td></tr>`;
-  return `<div class="panel"><div class="inv-head"><h2>Tender Documents</h2><button class="btn sm" style="margin-left:auto" onclick="openDoc('${t.id}')">${svg(IC.plus)} Record Document</button></div>
+  return `<div class="panel"><div class="inv-head"><h2>Tender Documents</h2><button class="btn sm" style="margin-left:auto" onclick="openDoc('${jsid(t.id)}')">${svg(IC.plus)} Record Document</button></div>
     <div class="tbl-scroll"><table class="jc-tbl"><thead><tr><th>Document</th><th>Type</th><th>Recorded</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="jc-hint" style="padding:12px 20px">${svg(IC.jobcost)} Document references (drawings, BOQ, proposal, correspondence) are logged here. File storage would attach to each record in a server-backed deployment.</div></div>`;
 }
@@ -957,7 +971,7 @@ function openDoc(tid){ openModal(`<div class="modal">${mh('',IC.po,'Record Docum
     <div class="fld col2"><label>Document name <span class="req">*</span></label><input class="f" id="dc-name" placeholder="e.g. BOQ-Rev2.xlsx, Drawings.pdf"></div>
     <div class="fld col2"><label>Type</label><select class="f" id="dc-type"><option>Drawing</option><option>BOQ</option><option>Tender notice</option><option>Submitted proposal</option><option>Correspondence</option><option>Other</option></select></div>
   </div></div>
-  <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitDoc('${tid}')">Save</button></div></div>`); }
+  <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitDoc('${jsid(tid)}')">Save</button></div></div>`); }
 function submitDoc(tid){ const t=TDR.tenders.find(x=>x.id===tid); const name=val('dc-name'); if(!name) return toast('Document name required');
   (t.docs=t.docs||[]).push({ id:'DOC-'+((t.docs||[]).length+1), name, type:val('dc-type'), at:new Date().toISOString() }); tAudit(tid,'add-doc',name); tSave(); closeModal(); renderView(); toast('Document recorded'); }
 function delDoc(tid,did){ const t=TDR.tenders.find(x=>x.id===tid); t.docs=t.docs.filter(d=>d.id!==did); tSave(); renderView(); }
@@ -977,7 +991,7 @@ function openStatus(tid){ const t=TDR.tenders.find(x=>x.id===tid); const nexts=(
     <div class="m-body"><div class="fld"><label>New status <span class="req">*</span></label><select class="f" id="st-to">${nexts.map(s=>`<option value="${s}">${s}</option>`).join('')}</select></div>
     <div class="fld"><label>Comment / reason</label><input class="f" id="st-note" placeholder="Why this change"></div>
     <div class="hint">${svg(IC.jobcost)}<div>“Won” is set only through <b>Mark as Won / Convert to Project</b>, which also creates the project. It is not available here.</div></div></div>
-    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="applyStatusFromModal('${tid}')">Update status</button></div></div>`);
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="applyStatusFromModal('${jsid(tid)}')">Update status</button></div></div>`);
 }
 function applyStatusFromModal(tid){ applyStatus(tid, val('st-to'), val('st-note')); closeModal(); }
 function applyStatus(tid, to, note, silent?){
@@ -1017,7 +1031,7 @@ function openConvert(tid){
       </div>
       <div class="hint">${svg(IC.projects)}<div>On confirm: a project is created in the Projects module with this BOQ as its budget baseline, the full JCR/JCL/overhead structure, and a permanent link back to this tender. The accepted contract value and the submitted bid are kept separately. Winning does <b>not</b> create POs, consumption or expenses — those happen in project execution.</div></div>
     </div>
-    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" style="background:var(--green)" onclick="confirmConvert('${tid}')">Confirm award &amp; create project</button></div></div>`);
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" style="background:var(--green)" onclick="confirmConvert('${jsid(tid)}')">Confirm award &amp; create project</button></div></div>`);
 }
 function confirmConvert(tid){
   const t=TDR.tenders.find(x=>x.id===tid); if(!t) return;
@@ -1078,7 +1092,7 @@ function openEditTender(tid){ const t=TDR.tenders.find(x=>x.id===tid);
       <div class="fld col2"><label>Special conditions</label><input class="f" id="et-cond" value="${esc(t.specialConditions||'')}"></div>
       <div class="fld col2"><label>Notes</label><input class="f" id="et-notes" value="${esc(t.notes||'')}"></div>
     </div></div>
-    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitEditTender('${tid}')">Save</button></div></div>`);
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitEditTender('${jsid(tid)}')">Save</button></div></div>`);
 }
 function submitEditTender(tid){ const t=TDR.tenders.find(x=>x.id===tid);
   Object.assign(t,{ name:val('et-name')||t.name, client:val('et-client'), clientRef:val('et-ref'), clientContact:val('et-contact'), desc:val('et-desc'),

@@ -28,6 +28,22 @@ button{font-family:inherit}
 .nav-item svg{width:19px;height:19px;flex-shrink:0}
 .nav-item:hover{background:var(--blue-l);color:var(--text)}
 .nav-item.active{background:var(--blue);color:#fff}
+.nav-badge{margin-left:auto;background:var(--red,#ef4444);color:#fff;font-size:11px;font-weight:800;min-width:18px;height:18px;padding:0 5px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;line-height:1}
+.nav-item.active .nav-badge{background:#fff;color:var(--blue)}
+.bell .bell-count{position:absolute;top:2px;right:2px;background:var(--red,#ef4444);color:#fff;font-size:10px;font-weight:800;min-width:16px;height:16px;padding:0 4px;border-radius:8px;display:flex;align-items:center;justify-content:center;line-height:1;border:2px solid #fff}
+.ac-list{display:flex;flex-direction:column}
+.ac-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 20px;border-top:1px solid var(--line);cursor:pointer;transition:.12s}
+.ac-row:first-child{border-top:none}
+.ac-row:hover{background:var(--blue-l)}
+.ac-row-l{display:flex;align-items:center;gap:12px;min-width:0}
+.ac-row-title{font-weight:600;font-size:14px}
+.ac-row-sub{color:var(--muted);font-size:12.5px;margin-top:2px}
+.ac-row-go{color:var(--dim);flex:none}.ac-row-go svg{width:18px;height:18px}
+.ts-chart{width:100%;height:auto;display:block}
+.ts-ax{fill:var(--muted);font-size:10px;font-family:inherit}
+.ts-legend{margin-left:auto;display:flex;gap:14px;flex-wrap:wrap}
+.ts-leg{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--muted)}
+.ts-leg i{width:11px;height:11px;border-radius:3px;display:inline-block}
 .side-promo{margin:10px 16px 18px;border-radius:14px;overflow:hidden;position:relative;min-height:190px;display:flex;flex-direction:column;justify-content:flex-end;padding:16px;color:#fff;background:linear-gradient(180deg,rgba(37,99,235,.1),rgba(15,23,42,.86)),url('https://images.unsplash.com/photo-1541888946425-d81bb19240f5?w=500&q=70&fm=jpg') center/cover}
 .side-promo .bar{width:34px;height:3px;background:var(--blue);border-radius:3px;margin-bottom:10px}
 .side-promo b{font-size:17px;font-weight:800;line-height:1.25;letter-spacing:-.01em}
