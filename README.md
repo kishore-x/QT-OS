@@ -54,15 +54,15 @@ Everything is **ledger-driven**: location balances are *computed* from an immuta
 ## Modules
 
 1. **Dashboard** — KPI cards (materials, store stock, site stock, in‑transit, pending receipts, pending requests), recent transfers, low‑stock, and a **Site Requests & Notes** feed.
-2. **Materials** — master catalog (code, name, category, unit, status); add/edit, activate/deactivate, **Excel/CSV import** with preview & duplicate checks.
-3. **Locations** — Central Store + Pilot Site (fixed for the pilot; editable details; built to scale).
-4. **Opening Stock** — day‑one balances per location, posted to the ledger; corrections via dated, reasoned **stock adjustments**.
+2. **Master Items** — the master catalog + **starting (opening) quantity** per location. Add items, edit details, set opening stock, and **Excel/CSV import** (items and opening balances) with preview & duplicate checks. Opening numbers are fixed — they don't change as transfers happen.
+3. **Current Stock** — the live stock page: per material and location it shows **Initial → Movement → Current**, plus **In‑Transit** and **Total**, auto‑updated by every transfer/receipt. Store Manager can post authorised **stock adjustments**.
+4. **Locations** — Central Store + Pilot Site (fixed for the pilot; editable details; built to scale).
 5. **Material Requests** — the **site raises an indent**; the **store reviews** (approve / reject / **modify quantities**); approval **auto-creates a linked transfer**.
 6. **Material Transfers** — create a multi‑item dispatch document (DC/MTN), dispatch, and track status (Draft → Pending → Partial → Completed).
-7. **Receipt Confirmation** — the site confirms **Accepted / Damaged / Short / Need More** (inline on the transfer or on a dedicated screen); partial receipts supported; discrepancy resolution for leftover in‑transit.
+7. **Receipt Confirmation** — the site confirms **Accepted / Damaged / Short / Need More** (inline on the transfer or on a dedicated screen); partial receipts supported; discrepancy resolution for leftover in‑transit. **Need More** auto‑raises a fresh request to the store.
 8. **Resend / Replace** — re-dispatch any quantity (defaults to the damaged amount) as a new linked transfer.
-9. **Current Stock** — per material: Central Store | In‑Transit | Pilot Site | Total.
-10. **Loss Register** — every damaged / short / written‑off unit, with KPIs, per‑event detail (transfer, material, qty, type, location, by) and a **Loss‑by‑Material** summary.
+9. **Loss Register** — every damaged / short / written‑off unit, with KPIs, per‑event detail (transfer, material, qty, type, location, by) and a **Loss‑by‑Material** summary.
+10. **Reports** — **Daily (1 day) / Weekly (7 days)** reports for **Transfers** and **Losses**, with KPIs, detail tables, a **Qualtech Engineers branded letterhead**, and **Print / PDF**.
 11. **Movement History** — the full ledger, searchable; keeps **actual transaction date** and **system entry timestamp** separately (supports delayed data entry).
 12. **Notifications** — site receipt remarks surface to the store (sidebar item + bell + dashboard panel), each linking to its transfer.
 13. **Settings** — app name, user, low‑stock threshold, demo‑data reset.

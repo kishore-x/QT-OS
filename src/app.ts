@@ -25,6 +25,7 @@ const IC: Record<string,string> = {
   stock:'<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/>',
   history:'<path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 3"/>',
   losses:'<path d="M23 18l-9.5-9.5-5 5L1 6"/><path d="M17 18h6v-6"/>',
+  reports:'<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',
   notes:'<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
   settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 6.8 19l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.2 6.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/>',
   search:'<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
@@ -152,11 +153,11 @@ let draftItems:TransferItem[]=[];
    =========================================================== */
 function navItems(){
   const all:[string,string][]=[
-    ['dashboard','Dashboard'],['materials','Materials'],['locations','Locations'],
-    ['opening','Opening Stock'],['requests','Material Requests'],['transfers','Material Transfers'],['receipts','Receipt Confirmation'],
-    ['notes','Notifications'],['stock','Current Stock'],['losses','Loss Register'],['history','Movement History'],['settings','Settings'],
+    ['dashboard','Dashboard'],['master','Master Items'],['stock','Current Stock'],['locations','Locations'],
+    ['requests','Material Requests'],['transfers','Material Transfers'],['receipts','Receipt Confirmation'],
+    ['notes','Notifications'],['losses','Loss Register'],['reports','Reports'],['history','Movement History'],['settings','Settings'],
   ];
-  if(isSite()) return all.filter(n=>['dashboard','requests','receipts','stock','losses','history'].includes(n[0]));
+  if(isSite()) return all.filter(n=>['dashboard','requests','receipts','stock','losses','reports','history'].includes(n[0]));
   return all;
 }
 function pendingForSite(){ return state.transfers.filter(t=>['PENDING','PARTIAL'].includes(transferStatus(t))).length; }
@@ -212,22 +213,22 @@ function notesViewHTML(){
   <div class="panel pad">${rows}</div>`;
 }
 let _ts:ReturnType<typeof setTimeout>|null=null;
-function topSearch(v:string){ qFilter=v; if(!['materials','stock','history','transfers'].includes(view)){ view='stock'; renderSidebar(); } if(_ts) clearTimeout(_ts); _ts=setTimeout(()=>{ _ts=null; renderView(); },180); }
+function topSearch(v:string){ qFilter=v; if(!['master','stock','history','transfers'].includes(view)){ view='stock'; renderSidebar(); } if(_ts) clearTimeout(_ts); _ts=setTimeout(()=>{ _ts=null; renderView(); },180); }
 
 function renderView(){
   const el=document.getElementById('app'); if(!el) return;
   try{
     switch(view){
       case 'dashboard': el.innerHTML=dashboardHTML(); break;
-      case 'materials': el.innerHTML=materialsHTML(); break;
+      case 'master': case 'materials': case 'opening': el.innerHTML=masterHTML(); break;
+      case 'stock':     el.innerHTML=stockHTML(); break;
       case 'locations': el.innerHTML=locationsHTML(); break;
-      case 'opening':   el.innerHTML=openingHTML(); break;
       case 'requests':  el.innerHTML=requestsHTML(); break;
       case 'transfers': el.innerHTML=curTransfer?transferDetailHTML(curTransfer):transfersHTML(); break;
       case 'receipts':  el.innerHTML=curTransfer?receiptConfirmHTML(curTransfer):receiptsHTML(); break;
       case 'notes':     el.innerHTML=notesViewHTML(); markNotesRead(); renderSidebar(); renderTopbar(); break;
-      case 'stock':     el.innerHTML=stockHTML(); break;
       case 'losses':    el.innerHTML=lossesHTML(); break;
+      case 'reports':   el.innerHTML=reportsHTML(); break;
       case 'history':   el.innerHTML=historyHTML(); break;
       case 'settings':  el.innerHTML=settingsHTML(); break;
       default: el.innerHTML=dashboardHTML();
@@ -876,18 +877,85 @@ function submitResolve(id:string){
   save(); closeModal(); renderView(); renderSidebar(); toast(n?'Discrepancy resolved':'Kept in transit');
 }
 
+function openingOf(code:string,locId:string){
+  // day-1 opening balance = sum of OPENING ledger entries into this location
+  return state.movements.filter(m=>m.code===code && m.type==='OPEN' && m.to===locId).reduce((s,m)=>s+m.qty,0);
+}
+
 /* ===========================================================
-   CURRENT STOCK
+   PAGE 1 — MASTER ITEMS (catalog + starting/opening quantity)
+   =========================================================== */
+function masterHTML(){
+  const cId=CENTRAL_ID(), sId=SITE_ID(); const q=qFilter.toLowerCase();
+  const cName=central()?central()!.name:'Central', sName=sites()[0]?sites()[0].name:'Site';
+  const list=state.materials.filter(m=>!q||m.code.toLowerCase().includes(q)||m.name.toLowerCase().includes(q)||m.category.toLowerCase().includes(q));
+  const rows=list.map(m=>{ const oc=openingOf(m.code,cId), os=openingOf(m.code,sId);
+    return `<tr>
+      <td class="n b">${esc(m.code)}</td><td>${esc(m.name)}</td><td>${esc(m.category)}</td><td>${esc(m.unit)}</td>
+      <td class="n">${num(oc)}</td><td class="n">${num(os)}</td><td class="n b">${num(oc+os)}</td>
+      <td>${m.active?'<span class="chip c-ok"><i></i>Active</span>':'<span class="chip c-out"><i></i>Inactive</span>'}</td>
+      ${isStore()?`<td class="row-act">
+        <button class="ic-btn" title="Edit item details" onclick="openMaterialForm('${jsid(m.code)}')">${svg(IC.edit,15)}</button>
+        <button class="ic-btn" title="Set opening quantity" onclick="openSetOpening('${jsid(m.code)}')">${svg(IC.opening,15)}</button>
+      </td>`:''}</tr>`;
+  }).join('');
+  const actions=isStore()?`<button class="btn ghost" onclick="openImport()">${svg(IC.upload)} Import Items</button><button class="btn ghost" onclick="openOpeningImport()">${svg(IC.upload)} Import Opening</button><button class="btn" onclick="openMaterialForm()">${svg(IC.plus)} Add Item</button>`:'';
+  const colspan=isStore()?9:8;
+  return `${pageTop('Master Items','The master list of all materials and their starting (opening) quantity. Add items and set opening stock here; day‑to‑day movement happens in Current Stock.', actions)}
+  <div class="panel"><table><thead><tr>
+    <th>Code</th><th>Material</th><th>Category</th><th>Unit</th>
+    <th class="n">Opening · ${esc(cName)}</th><th class="n">Opening · ${esc(sName)}</th><th class="n">Opening Total</th><th>Status</th>${isStore()?'<th></th>':''}
+  </tr></thead><tbody>${rows||`<tr><td colspan="${colspan}" style="text-align:center;color:var(--muted);padding:28px">No items found</td></tr>`}</tbody></table></div>
+  <div class="hint">${svg(IC.alert,14)} These are the <b>starting</b> quantities (day 1). They don't change as transfers happen — the live, moving numbers are in <b>Current Stock</b>.</div>`;
+}
+function openSetOpening(code:string){
+  const m=material(code)!; const cId=CENTRAL_ID(), sId=SITE_ID();
+  openModal(`<div class="modal">${mh(IC.opening,'Set Opening Quantity','Starting (day‑1) balance for '+esc(m.name))}
+    <div class="m-body"><div class="grid2">
+      <div class="fld"><label>${esc(central()!.name)} — opening</label><input class="f" id="so-c" type="number" min="0" value="${openingOf(code,cId)}"></div>
+      <div class="fld"><label>${esc(sites()[0].name)} — opening</label><input class="f" id="so-s" type="number" min="0" value="${openingOf(code,sId)}"></div>
+      <div class="fld col2"><label>Opening date</label><input class="f" id="so-date" type="date" value="2026-11-01"></div>
+    </div><div class="hint" style="margin:0">${svg(IC.alert,14)} This sets the master starting quantity. Current Stock shifts by the same amount; all later transfers still apply on top.</div></div>
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitSetOpening('${jsid(code)}')">Save Opening</button></div></div>`);
+}
+function submitSetOpening(code:string){
+  const c=numVal('so-c'), s=numVal('so-s'), date=val('so-date')||'2026-11-01';
+  state.movements=state.movements.filter(m=>!(m.type==='OPEN'&&m.code===code));
+  if(c>0) addMovement({code,qty:c,from:'OPENING',to:CENTRAL_ID(),type:'OPEN',ref:'Opening balance',txnDate:date});
+  if(s>0) addMovement({code,qty:s,from:'OPENING',to:SITE_ID(),type:'OPEN',ref:'Opening balance',txnDate:date});
+  save(); closeModal(); renderView(); toast('Opening quantity set for '+matName(code));
+}
+
+/* ===========================================================
+   PAGE 2 — CURRENT STOCK (Initial → Movement → Current, live)
    =========================================================== */
 function stockHTML(){
   const cId=CENTRAL_ID(), sId=SITE_ID(); const q=qFilter.toLowerCase();
-  const list=state.materials.filter(m=>!q||m.code.toLowerCase().includes(q)||m.name.toLowerCase().includes(q));
-  const rows=list.map(m=>{ const c=onHand(m.code,cId), tr=transitQty(m.code), s=onHand(m.code,sId); const tot=c+tr+s;
-    return `<tr><td class="n b">${esc(m.code)}</td><td>${esc(m.name)}</td><td>${esc(m.unit)}</td>
-      <td class="n">${num(c)}</td><td class="n">${tr?`<span style="color:var(--amber,#d97706)">${num(tr)}</span>`:'0'}</td><td class="n">${num(s)}</td><td class="n b">${num(tot)}</td></tr>`; }).join('');
-  const cId2=central(), sId2=sites()[0];
-  return `${pageTop('Current Stock','Where every material is right now — store, in transit, and confirmed at site.')}
-  <div class="panel"><table><thead><tr><th>Code</th><th>Material</th><th>Unit</th><th class="n">${esc(cId2?cId2.name:'Central')}</th><th class="n">In Transit</th><th class="n">${esc(sId2?sId2.name:'Site')}</th><th class="n">Total</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  const cName=central()?central()!.name:'Central', sName=sites()[0]?sites()[0].name:'Site';
+  const list=state.materials.filter(m=>!q||m.code.toLowerCase().includes(q)||m.name.toLowerCase().includes(q)||m.category.toLowerCase().includes(q));
+  const delta=(n:number)=> n===0?'<span style="color:var(--muted)">0</span>':(n>0?`<span style="color:var(--green)">+${num(n)}</span>`:`<span style="color:var(--red)">${num(n)}</span>`);
+  const rows=list.map(m=>{
+    const ci=openingOf(m.code,cId), cc=onHand(m.code,cId); const cm=cc-ci;
+    const si=openingOf(m.code,sId), sc=onHand(m.code,sId); const sm=sc-si;
+    const tr=transitQty(m.code); const tot=cc+tr+sc;
+    return `<tr>
+      <td class="n b">${esc(m.code)}</td><td>${esc(m.name)}</td><td>${esc(m.unit)}</td>
+      <td class="n" style="color:var(--muted)">${num(ci)}</td><td class="n">${delta(cm)}</td><td class="n b">${num(cc)}</td>
+      <td class="n">${tr?`<span style="color:var(--amber,#d97706)">${num(tr)}</span>`:'0'}</td>
+      <td class="n" style="color:var(--muted)">${num(si)}</td><td class="n">${delta(sm)}</td><td class="n b">${num(sc)}</td>
+      <td class="n b">${num(tot)}</td>
+      ${isStore()?`<td class="row-act"><button class="ic-btn" title="Adjust stock" onclick="openAdjust('${jsid(m.code)}')">${svg(IC.opening,15)}</button></td>`:''}</tr>`;
+  }).join('');
+  const colspan=isStore()?12:11;
+  return `${pageTop('Current Stock','Live balances — what each material started at, how much moved, and where it is now.', isStore()?`<button class="btn ghost" onclick="go('master')">${svg(IC.materials)} Master Items</button>`:'')}
+  <div class="panel"><table><thead>
+    <tr><th rowspan="2">Code</th><th rowspan="2">Material</th><th rowspan="2">Unit</th>
+      <th colspan="3" class="grp">${esc(cName)}</th><th rowspan="2" class="n">In Transit</th>
+      <th colspan="3" class="grp">${esc(sName)}</th><th rowspan="2" class="n">Total</th>${isStore()?'<th rowspan="2"></th>':''}</tr>
+    <tr><th class="n">Initial</th><th class="n">Movement</th><th class="n">Current</th>
+        <th class="n">Initial</th><th class="n">Movement</th><th class="n">Current</th></tr>
+  </thead><tbody>${rows||`<tr><td colspan="${colspan}" style="text-align:center;color:var(--muted);padding:28px">No materials found</td></tr>`}</tbody></table></div>
+  <div class="hint">${svg(IC.alert,14)} <b>Initial</b> = opening (from Master Items). <b>Movement</b> = net change from transfers/receipts (− left the store, + arrived at site). <b>Current</b> = live balance now. All updated automatically.</div>`;
 }
 
 /* ===========================================================
@@ -932,6 +1000,119 @@ function lossesHTML(){
     <div class="panel pad"><div class="panel-h"><b>Loss by Material</b></div>
       <table class="mv-table"><thead><tr><th>Code</th><th>Material</th><th class="n">Total Lost</th></tr></thead>
       <tbody>${matRows||`<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:20px">—</td></tr>`}</tbody></table></div>
+  </div>`;
+}
+
+/* ===========================================================
+   REPORTS — daily (1 day) & weekly (7 days) transfer report
+   =========================================================== */
+/* ---- Qualtech Engineers branding (used on reports) ---- */
+const BRAND = {
+  name:'Qualtech Engineers Pvt. Ltd.',
+  tagline:'Engineering Excellence. Built to Last.',
+  addr:'No.150, Tilak Street, Panneer Nagar, Mogappair West, Chennai – 600 037, INDIA',
+  email:'qualtechjai@gmail.com',
+  phone:'+91 044-26565206',
+};
+function brandLogo(size=44){
+  return `<svg viewBox="0 0 48 48" style="width:${size}px;height:${size}px" xmlns="http://www.w3.org/2000/svg">
+    <path d="M24 2 L29 19 L46 24 L29 29 L24 46 L19 29 L2 24 L19 19 Z" fill="#e23b2e"/>
+    <path d="M24 12 L26.5 21.5 L36 24 L26.5 26.5 L24 36 L21.5 26.5 L12 24 L21.5 21.5 Z" fill="#1b4f9b"/>
+    <circle cx="24" cy="24" r="2.4" fill="#fff"/></svg>`;
+}
+function reportLetterhead(title:string){
+  return `<div class="letterhead">
+    <div class="lh-brand">${brandLogo(46)}<div><div class="lh-name">${esc(BRAND.name)}</div><div class="lh-tag">${esc(BRAND.tagline)}</div></div></div>
+    <div class="lh-contact">${esc(BRAND.addr)}<br>${esc(BRAND.email)} · ${esc(BRAND.phone)}</div>
+    <div class="lh-meta"><div class="lh-title">${esc(title)}</div><div class="lh-sub">${isStore()?'Store Manager':'Site Manager'} view · Generated ${nowStamp()}</div></div>
+  </div>`;
+}
+let repPeriod:'day'|'week'='week';
+let repType:'transfers'|'losses'='transfers';
+let repDate=nowDate();
+function repShift(v:string){ repDate=v; renderView(); }
+function repSetPeriod(p:'day'|'week'){ repPeriod=p; renderView(); }
+function repSetType(t:'transfers'|'losses'){ repType=t; renderView(); }
+function dateMinus(d:string, n:number){ const t=new Date(d+'T00:00:00'); t.setDate(t.getDate()-n); return t.toISOString().slice(0,10); }
+function fmtRange(from:string,to:string){ return from===to?from:(from+' → '+to); }
+const repSum=(arr:number[])=>arr.reduce((s,n)=>s+n,0);
+function reportsHTML(){
+  const to=repDate, from=repPeriod==='day'?repDate:dateMinus(repDate,6);
+  const periodLabel=repPeriod==='day'?'Daily':'Weekly';
+  const controls=`<div class="rep-controls no-print">
+    <div class="seg"><button class="seg-b ${repType==='transfers'?'on':''}" onclick="repSetType('transfers')">Transfers</button><button class="seg-b ${repType==='losses'?'on':''}" onclick="repSetType('losses')">Losses</button></div>
+    <div class="seg"><button class="seg-b ${repPeriod==='day'?'on':''}" onclick="repSetPeriod('day')">Daily (1 day)</button><button class="seg-b ${repPeriod==='week'?'on':''}" onclick="repSetPeriod('week')">Weekly (7 days)</button></div>
+    <label class="rep-date">${repPeriod==='day'?'Date':'Week ending'} <input class="f" type="date" value="${repDate}" onchange="repShift(this.value)"></label>
+    <button class="btn ghost" onclick="window.print()">${svg(IC.reports)} Print / PDF</button>
+  </div>`;
+  const kind=repType==='losses'?'Loss':'Material Transfer';
+  const title=`${periodLabel} ${kind} Report — ${fmtRange(from,to)}`;
+  const sub=repType==='losses'?(`${periodLabel} loss report · ${fmtRange(from,to)}`):(`${periodLabel} transfer report · ${fmtRange(from,to)}`);
+  const body=repType==='losses'?reportLossBody(from,to):reportTransferBody(from,to);
+  return `${pageTop('Reports', sub, '')}${controls}${reportLetterhead(title)}${body}`;
+}
+function reportTransferBody(from:string,to:string){
+  const inRange=(d:string)=> d>=from && d<=to;
+  const trs=state.transfers.filter(t=>t.status!=='CANCELLED' && inRange(t.txnDate)).sort((a,b)=>a.txnDate.localeCompare(b.txnDate));
+  const rcs=state.receipts.filter(r=>inRange(r.txnDate));
+  const dispatched=repSum(trs.map(transferDispatched));
+  const accepted=repSum(rcs.flatMap(r=>r.items.map(i=>i.accepted)));
+  const damaged=repSum(rcs.flatMap(r=>r.items.map(i=>i.damaged)));
+  const short=repSum(rcs.flatMap(r=>r.items.map(i=>i.short)));
+  const completed=trs.filter(t=>transferStatus(t)==='CLOSED').length;
+  const pending=trs.filter(t=>['PENDING','PARTIAL'].includes(transferStatus(t))).length;
+  const draft=trs.filter(t=>transferStatus(t)==='DRAFT').length;
+  const kpis=`<div class="kpis">
+    ${kpi('Transfers', num(trs.length), IC.transfers)}
+    ${kpi('Dispatched Qty', num(dispatched), IC.truck)}
+    ${kpi('Received (Accepted)', num(accepted), IC.receipts)}
+    ${kpi('Damaged', num(damaged), IC.alert)}
+    ${kpi('Short / Lost', num(short), IC.losses)}
+    ${kpi('Completed', num(completed), IC.check)}
+  </div>`;
+  const rows=trs.length?trs.map(t=>{ const recQ=repSum(trReceipts(t.id).flatMap(r=>r.items.map(i=>i.accepted+i.damaged)));
+    return `<tr onclick="openTransfer('${jsid(t.id)}')" style="cursor:pointer">
+      <td>${esc(t.txnDate)}</td><td class="n b">${esc(t.id)}</td><td>${esc(t.docType)}-${esc(t.docNo)}</td>
+      <td>${esc(locName(t.from))} → ${esc(locName(t.to))}</td>
+      <td class="n">${t.items.length}</td><td class="n">${num(transferDispatched(t))}</td>
+      <td class="n">${num(recQ)}</td><td>${statusChip(transferStatus(t))}</td><td>${esc(t.createdBy)}</td></tr>`; }).join('')
+    :`<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:26px">No transfers in this period</td></tr>`;
+  return `${kpis}
+  <div class="panel pad"><div class="panel-h"><b>Transfers</b> <span class="count">${trs.length}</span>
+    <span style="margin-left:auto;font-size:12px;color:var(--muted)">Completed ${completed} · Pending ${pending} · Draft ${draft}</span></div>
+    <table class="mv-table"><thead><tr><th>Date</th><th>Transfer</th><th>Document</th><th>Route</th><th class="n">Items</th><th class="n">Dispatched</th><th class="n">Received</th><th>Status</th><th>By</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+function reportLossBody(from:string,to:string){
+  const inRange=(d:string)=> d>=from && d<=to;
+  const ev=lossMovements().filter(m=>inRange(m.txnDate)).slice().reverse();
+  const totDamage=repSum(ev.filter(m=>m.type==='DAMAGE').map(m=>m.qty));
+  const totShort=repSum(ev.filter(m=>m.type==='SHORT').map(m=>m.qty));
+  const totAdj=repSum(ev.filter(m=>m.type==='ADJUST').map(m=>m.qty));
+  const trAffected=new Set(ev.map(m=>m.ref).filter(r=>/^TR-/.test(r))).size;
+  const kpis=`<div class="kpis">
+    ${kpi('Damaged', num(totDamage), IC.alert)}
+    ${kpi('Short / Lost', num(totShort), IC.truck)}
+    ${kpi('Adjustment Loss', num(totAdj), IC.opening)}
+    ${kpi('Loss Events', num(ev.length), IC.losses)}
+    ${kpi('Transfers Affected', num(trAffected), IC.transfers)}
+  </div>`;
+  const byMat:Record<string,number>={}; for(const m of ev) byMat[m.code]=(byMat[m.code]||0)+m.qty;
+  const matRows=Object.keys(byMat).sort((a,b)=>byMat[b]-byMat[a]).map(c=>`<tr><td class="n b">${esc(c)}</td><td>${esc(matName(c))}</td><td class="n">${num(byMat[c])} ${esc(matUnit(c))}</td></tr>`).join('');
+  const rows=ev.length?ev.map(m=>`<tr>
+    <td>${esc(m.txnDate)}</td>
+    <td>${/^TR-/.test(m.ref)?`<a class="lnk" onclick="openTransfer('${jsid(m.ref)}')">${esc(m.ref)}</a>`:esc(m.ref||'—')}</td>
+    <td class="n b">${esc(m.code)}</td><td>${esc(matName(m.code))}</td>
+    <td class="n">${num(m.qty)} ${esc(matUnit(m.code))}</td>
+    <td><span class="chip ${m.type==='DAMAGE'?'c-out':'c-low'}"><i></i>${lossKind(m)}</span></td>
+    <td>${esc(locName(lossLocation(m)))}</td><td>${esc(m.person)}</td></tr>`).join('')
+    :`<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:26px">No losses in this period 🎉</td></tr>`;
+  return `${kpis}
+  <div class="dash-grid">
+    <div class="panel pad"><div class="panel-h"><b>Loss Events</b> <span class="count">${ev.length}</span></div>
+      <table class="mv-table"><thead><tr><th>Date</th><th>Transfer</th><th>Code</th><th>Material</th><th class="n">Qty</th><th>Type</th><th>Location</th><th>By</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="panel pad"><div class="panel-h"><b>Loss by Material</b></div>
+      <table class="mv-table"><thead><tr><th>Code</th><th>Material</th><th class="n">Total Lost</th></tr></thead><tbody>${matRows||`<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:20px">—</td></tr>`}</tbody></table></div>
   </div>`;
 }
 
