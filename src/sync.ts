@@ -19,10 +19,10 @@
    ============================================================ */
 'use strict';
 
-const SYNC_BUILD = '44';
-const SYNC_SCRIPTS = ['data', 'jcr-data', 'app', 'tender', 'procure', 'billing'];
+const SYNC_BUILD = '53';
+const SYNC_SCRIPTS = ['data', 'app'];
 /** must match the *_LS keys in the app and STORE_KEYS on the server */
-const SYNC_KEYS = ['qualtech-inv-v3', 'qualtech-jcr-v3', 'qualtech-tender-v2', 'qualtech-mr-v1', 'qualtech-billing-v2'];
+const SYNC_KEYS = ['mtts-v1'];
 
 type SyncMode = 'server' | 'local';
 type SyncStatus = 'saved' | 'saving' | 'offline' | 'error';
@@ -142,10 +142,7 @@ function syncLoadScripts(done: () => void) {
 
 /** First run on a new server: upload the data the app just loaded, so everyone starts from the same copy. */
 function syncUploadMissing() {
-  const live: Record<string, unknown> = {
-    'qualtech-inv-v3': state, 'qualtech-jcr-v3': jcr, 'qualtech-tender-v2': TDR,
-    'qualtech-mr-v1': MR, 'qualtech-billing-v2': BILL,
-  };
+  const live: Record<string, unknown> = { 'mtts-v1': state };
   for (const key of SYNC_KEYS) if (!syncVersions[key] && live[key]) syncPending[key] = live[key];
   Object.keys(syncPending).forEach(syncFlush);
 }

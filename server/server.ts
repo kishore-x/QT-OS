@@ -13,7 +13,7 @@
 
    Env
      PORT         default 3000
-     DB_FILE      default ./data/qualtech.db
+     DB_FILE      default ./data/mtts.db
      QT_PASSWORD  if set, every request needs HTTP Basic auth
                   (any username, this password)
    ============================================================ */
@@ -31,7 +31,7 @@ const gzipAsync = promisify(gzip);
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT) || 3000;
-const DB_FILE = resolve(ROOT, process.env.DB_FILE || 'data/qualtech.db');
+const DB_FILE = resolve(ROOT, process.env.DB_FILE || 'data/mtts.db');
 const PASSWORD = process.env.QT_PASSWORD || '';
 const MAX_BODY = 25 * 1024 * 1024;
 
@@ -40,11 +40,7 @@ const MAX_BODY = 25 * 1024 * 1024;
     this stops a malformed or malicious payload from corrupting a shared store
     and breaking the app for every user. Must match the *_LS keys in src/. */
 const STORE_SHAPES: Record<string, string[]> = {
-  'qualtech-inv-v3':     ['movements', 'items', 'locations', 'vendors'],  // app.ts
-  'qualtech-jcr-v3':     ['projects', 'entries', 'costCodes'],            // app.ts
-  'qualtech-tender-v2':  ['tenders'],                                     // tender.ts
-  'qualtech-mr-v1':      ['requests', 'pos'],                             // procure.ts
-  'qualtech-billing-v2': ['docs'],                                        // billing.ts
+  'mtts-v1': ['materials', 'locations', 'requests', 'transfers', 'receipts', 'movements'],  // app.ts
 };
 const STORE_KEYS = new Set(Object.keys(STORE_SHAPES));
 

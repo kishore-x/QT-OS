@@ -1,8 +1,8 @@
 {
-  "name": "qualtech-os",
+  "name": "material-transfer-tracking",
   "version": "1.0.0",
   "private": true,
-  "description": "Qualtech Engineers — inventory / ERP dashboard",
+  "description": "Material Transfer & Inventory Tracking System — Phase 1 pilot",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "watch": "tsc -p tsconfig.json --watch",
