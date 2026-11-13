@@ -881,6 +881,15 @@ function openingOf(code:string,locId:string){
   // day-1 opening balance = sum of OPENING ledger entries into this location
   return state.movements.filter(m=>m.code===code && m.type==='OPEN' && m.to===locId).reduce((s,m)=>s+m.qty,0);
 }
+/** The most recent movement (signed) for a material at a location — updates every transfer/receipt. */
+function lastMove(code:string, locId:string): {q:number; d:string; ref:string}|null {
+  for(let i=state.movements.length-1;i>=0;i--){ const m=state.movements[i];
+    if(m.code!==code || m.type==='OPEN') continue;
+    if(m.to===locId) return {q:m.qty, d:m.txnDate, ref:m.ref};
+    if(m.from===locId) return {q:-m.qty, d:m.txnDate, ref:m.ref};
+  }
+  return null;
+}
 
 /* ===========================================================
    PAGE 1 — MASTER ITEMS (catalog + starting/opening quantity)
@@ -933,16 +942,18 @@ function stockHTML(){
   const cId=CENTRAL_ID(), sId=SITE_ID(); const q=qFilter.toLowerCase();
   const cName=central()?central()!.name:'Central', sName=sites()[0]?sites()[0].name:'Site';
   const list=state.materials.filter(m=>!q||m.code.toLowerCase().includes(q)||m.name.toLowerCase().includes(q)||m.category.toLowerCase().includes(q));
-  const delta=(n:number)=> n===0?'<span style="color:var(--muted)">0</span>':(n>0?`<span style="color:var(--green)">+${num(n)}</span>`:`<span style="color:var(--red)">${num(n)}</span>`);
+  const moveCell=(mvObj:{q:number;d:string}|null)=>{ if(!mvObj) return '<span style="color:var(--muted)">—</span>';
+    const col=mvObj.q>0?'var(--green)':(mvObj.q<0?'var(--red)':'var(--muted)');
+    const sign=mvObj.q>0?'+':''; return `<span style="color:${col};font-weight:600">${sign}${num(mvObj.q)}</span><span class="mv-date">${esc(mvObj.d)}</span>`; };
   const rows=list.map(m=>{
-    const ci=openingOf(m.code,cId), cc=onHand(m.code,cId); const cm=cc-ci;
-    const si=openingOf(m.code,sId), sc=onHand(m.code,sId); const sm=sc-si;
+    const ci=openingOf(m.code,cId), cc=onHand(m.code,cId); const cmv=lastMove(m.code,cId);
+    const si=openingOf(m.code,sId), sc=onHand(m.code,sId); const smv=lastMove(m.code,sId);
     const tr=transitQty(m.code); const tot=cc+tr+sc;
     return `<tr>
       <td class="n b">${esc(m.code)}</td><td>${esc(m.name)}</td><td>${esc(m.unit)}</td>
-      <td class="n" style="color:var(--muted)">${num(ci)}</td><td class="n">${delta(cm)}</td><td class="n b">${num(cc)}</td>
+      <td class="n" style="color:var(--muted)">${num(ci)}</td><td class="n">${moveCell(cmv)}</td><td class="n b">${num(cc)}</td>
       <td class="n">${tr?`<span style="color:var(--amber,#d97706)">${num(tr)}</span>`:'0'}</td>
-      <td class="n" style="color:var(--muted)">${num(si)}</td><td class="n">${delta(sm)}</td><td class="n b">${num(sc)}</td>
+      <td class="n" style="color:var(--muted)">${num(si)}</td><td class="n">${moveCell(smv)}</td><td class="n b">${num(sc)}</td>
       <td class="n b">${num(tot)}</td>
       ${isStore()?`<td class="row-act"><button class="ic-btn" title="Adjust stock" onclick="openAdjust('${jsid(m.code)}')">${svg(IC.opening,15)}</button></td>`:''}</tr>`;
   }).join('');
@@ -952,10 +963,10 @@ function stockHTML(){
     <tr><th rowspan="2">Code</th><th rowspan="2">Material</th><th rowspan="2">Unit</th>
       <th colspan="3" class="grp">${esc(cName)}</th><th rowspan="2" class="n">In Transit</th>
       <th colspan="3" class="grp">${esc(sName)}</th><th rowspan="2" class="n">Total</th>${isStore()?'<th rowspan="2"></th>':''}</tr>
-    <tr><th class="n">Initial</th><th class="n">Movement</th><th class="n">Current</th>
-        <th class="n">Initial</th><th class="n">Movement</th><th class="n">Current</th></tr>
+    <tr><th class="n">Initial</th><th class="n">Latest Move</th><th class="n">Current</th>
+        <th class="n">Initial</th><th class="n">Latest Move</th><th class="n">Current</th></tr>
   </thead><tbody>${rows||`<tr><td colspan="${colspan}" style="text-align:center;color:var(--muted);padding:28px">No materials found</td></tr>`}</tbody></table></div>
-  <div class="hint">${svg(IC.alert,14)} <b>Initial</b> = opening (from Master Items). <b>Movement</b> = net change from transfers/receipts (− left the store, + arrived at site). <b>Current</b> = live balance now. All updated automatically.</div>`;
+  <div class="hint">${svg(IC.alert,14)} <b>Initial</b> = opening (from Master Items). <b>Latest Move</b> = the most recent transfer/receipt change — updates every time a transfer happens (− left the store, + arrived at site), with its date. <b>Current</b> = live balance now.</div>`;
 }
 
 /* ===========================================================
