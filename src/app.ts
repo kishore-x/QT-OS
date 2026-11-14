@@ -26,6 +26,13 @@ const IC: Record<string,string> = {
   history:'<path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 3"/>',
   losses:'<path d="M23 18l-9.5-9.5-5 5L1 6"/><path d="M17 18h6v-6"/>',
   reports:'<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',
+  dots:'<circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/>',
+  user:'<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  lock:'<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  eye:'<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>',
+  eyeoff:'<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M1 1l22 22"/>',
+  cright:'<path d="m9 18 6-6-6-6"/>',
+  logout:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
   notes:'<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
   settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 6.8 19l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.2 6.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/>',
   search:'<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
@@ -115,7 +122,7 @@ function nextId(prefix:string, arrKey:'transfers'|'receipts'|'materials'|'locati
 }
 function addMovement(mv:Partial<Movement>){
   const m:Movement={ id:'MV-'+(1000+state.movements.length+1), code:mv.code!, qty:mv.qty!, from:mv.from!, to:mv.to!,
-    type:mv.type||'ADJUST', ref:mv.ref||'', person:mv.person||state.settings.user,
+    type:mv.type||'ADJUST', ref:mv.ref||'', person:mv.person||me(),
     txnDate:mv.txnDate||nowDate(), date:nowDate(), time:nowTime() };
   state.movements.push(m);
 }
@@ -124,9 +131,31 @@ function esc(s:any){ return String(s==null?'':s).replace(/[&<>"'`]/g,c=>(({'&':'
 function jsid(s:any){ return String(s==null?'':s).replace(/[^A-Za-z0-9 _.\/:-]/g,''); }
 
 /* ---------- roles ---------- */
-const role=()=>state.settings.role;
+/* ---------- auth / sessions (per browser, local) ---------- */
+interface Session { name:string; role:Role; title:string; }
+const USERS:{u:string;pw:string;name:string;role:Role;title:string}[]=[
+  { u:'store', pw:'store123', name:'Mariappan',     role:'store', title:'Store Manager' },
+  { u:'site',  pw:'site123',  name:'M. Mariappan',  role:'site',  title:'Site Manager'  },
+];
+const SESS_LS='mtts-session';
+let session: Session|null = (()=>{ try{ const r=localStorage.getItem(SESS_LS); if(r) return JSON.parse(r); }catch{} return null; })();
+function saveSession(){ try{ session?localStorage.setItem(SESS_LS,JSON.stringify(session)):localStorage.removeItem(SESS_LS); }catch{} }
+function me(){ return session?session.name:me(); }
+const role=()=>session?session.role:(state.settings.role||'store');
 const isStore=()=>role()==='store';
 const isSite=()=>role()==='site';
+function doLogin(){
+  const u=val('lg-user').toLowerCase(), pw=val('lg-pass');
+  const acc=USERS.find(x=>x.u===u && x.pw===pw);
+  if(!acc) return toast('Invalid username or password');
+  loginAs(acc.role);
+}
+function loginAs(r:Role){
+  const acc=USERS.find(x=>x.role===r)!; session={name:acc.name,role:acc.role,title:acc.title}; saveSession();
+  view='dashboard'; curTransfer=''; document.body.classList.remove('logged-out'); boot();
+  toast('Signed in as '+acc.title);
+}
+function logout(){ session=null; saveSession(); view='dashboard'; boot(); }
 
 /* ---------- site notes / notifications (receipt remarks surfaced to the store) ---------- */
 interface SiteNote { id:string; transferId:string; label:string; by:string; when:string; text:string; }
@@ -152,17 +181,25 @@ let draftItems:TransferItem[]=[];
    SHELL
    =========================================================== */
 function navItems(){
-  const all:[string,string][]=[
-    ['dashboard','Dashboard'],['master','Master Items'],['stock','Current Stock'],['locations','Locations'],
-    ['requests','Material Requests'],['transfers','Material Transfers'],['receipts','Receipt Confirmation'],
-    ['notes','Notifications'],['losses','Loss Register'],['reports','Reports'],['history','Movement History'],['settings','Settings'],
+  return navGroups().flatMap(g=>g[1]);
+}
+function navGroups(): [string, [string,string][]][]{
+  let groups:[string,[string,string][]][]=[
+    ['OVERVIEW', [['dashboard','Dashboard']]],
+    ['INVENTORY', [['master','Master Items'],['stock','Current Stock'],['locations','Locations']]],
+    ['OPERATIONS', [['requests','Material Requests'],['transfers','Material Transfers'],['receipts','Receipt Confirmation']]],
+    ['TRACKING', [['notes','Notifications'],['losses','Loss Register'],['reports','Reports'],['history','Movement History']]],
+    ['SYSTEM', [['settings','Settings']]],
   ];
-  if(isSite()) return all.filter(n=>['dashboard','requests','receipts','stock','losses','reports','history'].includes(n[0]));
-  return all;
+  if(isSite()){
+    const allow=new Set(['dashboard','requests','receipts','stock','losses','reports','history']);
+    groups=groups.map(([t,items])=>[t, items.filter(n=>allow.has(n[0]))] as [string,[string,string][]]).filter(g=>g[1].length);
+  }
+  return groups;
 }
 function pendingForSite(){ return state.transfers.filter(t=>['PENDING','PARTIAL'].includes(transferStatus(t))).length; }
 function pendingRequests(){ return state.requests.filter(r=>r.status==='PENDING').length; }
-function openRequestsForSite(){ return state.requests.filter(r=>r.requestedBy===state.settings.user || r.status!=='REJECTED').length; }
+function openRequestsForSite(){ return state.requests.filter(r=>r.requestedBy===me() || r.status!=='REJECTED').length; }
 
 function renderSidebar(){
   const nav=navItems();
@@ -170,21 +207,24 @@ function renderSidebar(){
   const unread=isStore()?unreadNotes().length:0;
   const preq=isStore()?pendingRequests():0;
   const badge=(k:string)=>{ if(k==='receipts'&&pend) return `<span class="nav-badge">${pend}</span>`; if(k==='notes'&&unread) return `<span class="nav-badge">${unread>9?'9+':unread}</span>`; if(k==='requests'&&preq) return `<span class="nav-badge">${preq}</span>`; return ''; };
+  const sections=navGroups().map(([title,items])=>`
+    <div class="nav-sec">${esc(title)}</div>
+    ${items.map(n=>`<button class="nav-item ${view===n[0]?'active':''}" onclick="go('${n[0]}')">${svg(IC[n[0]]||IC.dashboard)}<span>${n[1]}</span>${badge(n[0])}</button>`).join('')}`).join('');
   document.getElementById('sidebar')!.innerHTML=`
-    <div class="logo">${svg(IC.logo,36)}<b>Material Transfer<br>& Tracking</b></div>
-    <nav class="nav">${nav.map(n=>`<button class="nav-item ${view===n[0]?'active':''}" onclick="go('${n[0]}')">${svg(IC[n[0]]||IC.dashboard)} ${n[1]}${badge(n[0])}</button>`).join('')}</nav>
-    <div class="side-foot">Phase 1 Pilot · ${esc(central()?central()!.name:'')} → ${esc(sites()[0]?sites()[0].name:'')}</div>`;
+    <div class="logo">${brandLogo(34)}<b class="ql">Qualtech<span>Engineers Pvt. Ltd.</span></b></div>
+    <nav class="nav">${sections}</nav>
+    <div class="side-foot">v1.0 · Phase 1 Pilot · ${esc(central()?central()!.name:'')} → ${esc(sites()[0]?sites()[0].name:'')}</div>`;
 }
 function renderTopbar(){
   const dark=document.documentElement.getAttribute('data-theme')==='dark';
-  const u=state.settings.user, r=isStore()?'Store Manager':'Site Manager';
+  const u=me(), r=isStore()?'Store Manager':'Site Manager';
+  const initials=u.split(' ').map(w=>w[0]).join('').slice(0,2);
   document.getElementById('topbar')!.innerHTML=`
     <div class="search">${svg(IC.search)}<input id="topSearch" placeholder="Search material, code or location…" value="${esc(qFilter)}" oninput="topSearch(this.value)"></div>
     <div class="tb-right">
-      <button class="role-toggle" title="Switch demo role" onclick="switchRole()">${svg(isStore()?IC.warehouse:IC.locations,16)} <b>${r}</b> ${svg(IC.chev,14)}</button>
-      ${isStore()?(()=>{const u=unreadNotes().length;return `<button class="bell" title="Site requests" onclick="openNotes()">${u?`<span class="bell-count">${u>9?'9+':u}</span>`:''}${svg(IC.bell)}</button>`;})():''}
-      <button class="bell" title="Toggle light / dark" onclick="toggleTheme()">${svg(dark?ICsun:ICmoon)}</button>
-      <div class="user"><div class="avatar">${esc(u.split(' ').map(w=>w[0]).join('').slice(0,2))}</div><div class="u"><b>${esc(u)}</b><span>${r}</span></div></div>
+      <button class="icn" title="Toggle light / dark" onclick="toggleTheme()">${svg(dark?ICsun:ICmoon)}</button>
+      ${isStore()?(()=>{const n=unreadNotes().length;return `<button class="icn" title="Site requests" onclick="openNotes()">${n?`<span class="icn-dot">${n>9?'9+':n}</span>`:''}${svg(IC.bell)}</button>`;})():`<button class="icn" title="Notifications">${svg(IC.bell)}</button>`}
+      <button class="user-chip" title="Sign out" onclick="logout()"><div class="avatar">${esc(initials)}</div><div class="u"><b>${esc(u)}</b><span>${esc(r)}</span></div>${svg(IC.chev,16)}</button>
     </div>`;
 }
 function switchRole(){ state.settings.role = isStore()?'site':'store'; save(); if(!navItems().some(n=>n[0]===view)) view='dashboard'; renderSidebar(); renderTopbar(); renderView(); toast('Now acting as '+(isStore()?'Store Manager':'Site Manager')); }
@@ -259,19 +299,51 @@ function empty(icon:string,msg:string){ return `<div class="panel" style="paddin
    DASHBOARD
    =========================================================== */
 function kpi(label:string, value:string, icon:string){ return `<div class="kpi"><div class="k-ic" style="background:var(--blue-l);color:var(--blue)">${svg(icon)}</div><div><div class="kv">${value}</div><div class="kl">${label}</div></div></div>`; }
+/* KPI card — minimalist: outline icon + number + label + sub */
+function lkpi(value:string, label:string, sub:string, icon:string, go?:string){
+  return `<div class="lkpi"${go?` onclick="go('${go}')" style="cursor:pointer"`:''}>
+    <div class="lkpi-ic">${svg(icon)}</div>
+    <div class="lkpi-txt"><div class="lkpi-n">${value}</div><div class="lkpi-l">${esc(label)}</div><div class="lkpi-sub">${esc(sub)}</div></div></div>`;
+}
+function secLabel(no:string, title:string, right=''){
+  return `<div class="sec-label"><span class="sec-no">${esc(no)}</span><span class="sec-bar"></span><span class="sec-t">${esc(title)}</span>${right?`<div class="sec-right">${right}</div>`:''}</div>`;
+}
+function heroDate(){
+  const d=new Date(nowDate()+'T00:00:00');
+  const wd=['SUN','MON','TUE','WED','THU','FRI','SAT'][d.getDay()];
+  const mo=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][d.getMonth()];
+  return `<div class="hero-date"><span class="hd-wd">${wd}</span><b class="hd-n">${d.getDate()}</b><span class="hd-m">${mo} ${d.getFullYear()}</span></div>`;
+}
 function dashboardHTML(){
   const cId=CENTRAL_ID(), sId=SITE_ID();
   const pend=state.transfers.filter(t=>transferStatus(t)==='PENDING').length;
   const partial=state.transfers.filter(t=>transferStatus(t)==='PARTIAL').length;
+  const completed=state.transfers.filter(t=>transferStatus(t)==='CLOSED').length;
+  const totLoss=lossMovements().reduce((s,m)=>s+m.qty,0);
   const low=state.materials.filter(m=>m.active && onHand(m.code,cId)>0 && onHand(m.code,cId)<=state.settings.lowStock);
   const recent=state.transfers.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,6);
-  const k=`<div class="kpis">
-    ${kpi('Registered Materials', num(state.materials.filter(m=>m.active).length), IC.materials)}
-    ${kpi('Central Store Stock', num(Math.round(locationTotal(cId))), IC.warehouse)}
-    ${kpi('Pilot Site Stock', num(Math.round(locationTotal(sId))), IC.building)}
-    ${kpi('In Transit', num(Math.round(totalTransit())), IC.truck)}
-    ${kpi('Pending Receipts', num(pend), IC.receipts)}
-    ${isStore()?kpi('Pending Requests', num(pendingRequests()), IC.requests):kpi('Total Transfers', num(state.transfers.length), IC.transfers)}
+  const name=me().replace(/^[A-Za-z]\.\s+/,'')||me();
+  const c=central()?central()!.name:'Central Store', s=sites()[0]?sites()[0].name:'Pilot Site';
+  const hero=`<div class="hero">
+    <div class="hero-row">
+      <div class="hero-left"><div class="eyebrow">Dashboard</div>
+        <h1 class="hero-h">Welcome back,<br>${esc(name)}.</h1></div>
+      <div class="hero-meta">${heroDate()}
+        <div class="route-pills"><span class="pt-pill">${esc(c)} <span class="pt-arrow">${svg(IC.arrow,14)}</span> ${esc(s)}</span><span class="pt-pill soft">Phase 1 Pilot</span></div>
+      </div>
+    </div>
+    <p class="hero-sub">${isStore()?'Store Manager':'Site Manager'} overview — materials, transfers, receipts and stock movement.</p>
+    <div class="period-toggle"><button class="pt">This Month</button><button class="pt">Last 3 Months</button><button class="pt on">All Time</button></div>
+  </div>`;
+  const k=`<div class="lkpis">
+    ${lkpi(num(state.materials.filter(m=>m.active).length),'Registered Materials','Master items', IC.materials,'master')}
+    ${lkpi(num(Math.round(locationTotal(cId))),'Central Store Stock','On hand now', IC.warehouse,'stock')}
+    ${lkpi(num(Math.round(locationTotal(sId))),'Pilot Site Stock','Confirmed at site', IC.building,'stock')}
+    ${lkpi(num(Math.round(totalTransit())),'In Transit','Dispatched, not received', IC.truck,'receipts')}
+    ${lkpi(num(pend),'Pending Receipts','Awaiting confirmation', IC.receipts,'receipts')}
+    ${lkpi(num(isStore()?pendingRequests():state.requests.length),'Material Requests',isStore()?'Awaiting approval':'Raised', IC.requests,'requests')}
+    ${lkpi(num(completed),'Completed Transfers','Fully reconciled', IC.check,'transfers')}
+    ${lkpi(num(totLoss),'Total Loss','Damaged / short units', IC.losses,'losses')}
   </div>`;
   const recentRows=recent.length?recent.map(t=>{
     const st=transferStatus(t);
@@ -280,18 +352,22 @@ function dashboardHTML(){
       <td>${esc(locName(t.from))} → ${esc(locName(t.to))}</td>
       <td class="n">${num(transferDispatched(t))}</td><td>${statusChip(st)}</td><td>${esc(t.txnDate)}</td></tr>`;
   }).join(''):`<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">No transfers yet</td></tr>`;
-  const lowRows=low.length?low.map(m=>`<tr><td class="n b">${esc(m.code)}</td><td>${esc(m.name)}</td><td class="n">${num(onHand(m.code,cId))} ${esc(m.unit)}</td></tr>`).join(''):`<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:20px">No low-stock materials</td></tr>`;
-  return `${pageTop('Dashboard','Operational status at a glance — '+esc(central()?central()!.name:'')+' → '+esc(sites()[0]?sites()[0].name:''), isStore()?`<button class="btn" onclick="openTransferForm()">${svg(IC.plus)} New Transfer</button>`:'')}
+  const lowPanel=low.length
+    ? `<table class="mv-table"><thead><tr><th>Code</th><th>Material</th><th class="n">On hand</th></tr></thead><tbody>${low.map(m=>`<tr><td class="n b">${esc(m.code)}</td><td>${esc(m.name)}</td><td class="n">${num(onHand(m.code,cId))} ${esc(m.unit)}</td></tr>`).join('')}</tbody></table>`
+    : `<div class="empty-state">${svg(IC.materials,34)}<b>No low-stock materials</b><span>All materials are within stock limits.</span></div>`;
+  return `${hero}
   ${k}
+  ${isStore()?`<div class="xfer-row"><button class="btn dark" onclick="openTransferForm()">${svg(IC.plus)} New Transfer</button></div>`:''}
   <div class="dash-grid">
-    <div class="panel pad"><div class="panel-h"><b>Recent Transfers</b>${isStore()?`<button class="btn ghost sm" onclick="go('transfers')">View all</button>`:''}</div>
+    <div class="panel pad">
+      <div class="panel-h"><span class="sec-accent"></span><b>Recent Transfers</b>${isStore()?`<a class="rt-link" onclick="go('transfers')">View All ${svg(IC.arrow,15)}</a>`:''}</div>
       <table class="mv-table"><thead><tr><th>Transfer</th><th>Document</th><th>Route</th><th class="n">Qty</th><th>Status</th><th>Date</th></tr></thead><tbody>${recentRows}</tbody></table></div>
-    <div class="panel pad"><div class="panel-h"><b>Low Stock · Central Store</b></div>
-      <table class="mv-table"><thead><tr><th>Code</th><th>Material</th><th class="n">On hand</th></tr></thead><tbody>${lowRows}</tbody></table>
+    <div class="panel pad"><div class="panel-h"><span class="sec-accent"></span><b>Low Stock · Central Store</b></div>
+      ${lowPanel}
       ${partial?`<div class="note-row">${svg(IC.alert,15)} ${partial} transfer(s) partially received — awaiting reconciliation</div>`:''}
     </div>
   </div>
-  ${isStore()?siteRequestsPanel():''}`;
+  ${isStore()?secLabel('','Site requests')+siteRequestsPanel():''}`;
 }
 function siteRequestsPanel(){
   const notes=siteNotes().slice(0,6); const read=state.settings.readNotes||[]; const unread=unreadNotes().length;
@@ -517,7 +593,7 @@ function openRequestForm(){
     <div class="m-body">
       <div class="grid2">
         <div class="fld"><label>Request Date</label><input class="f" id="rq-date" type="date" value="${nowDate()}"></div>
-        <div class="fld"><label>Requested By</label><input class="f" id="rq-by" value="${esc(state.settings.user)}"></div>
+        <div class="fld"><label>Requested By</label><input class="f" id="rq-by" value="${esc(me())}"></div>
         <div class="fld col2"><label>Remarks / Reason</label><input class="f" id="rq-remarks" placeholder="Needed for slab casting next week…"></div>
       </div>
       <div class="line-add">
@@ -545,7 +621,7 @@ function renderReqLines(){
 }
 function submitRequest(){
   if(!reqDraftItems.length) return toast('Add at least one material');
-  const r:MaterialRequest={ id:nextId('REQ-','requests','id'), requestedBy:val('rq-by')||state.settings.user, txnDate:val('rq-date')||nowDate(),
+  const r:MaterialRequest={ id:nextId('REQ-','requests','id'), requestedBy:val('rq-by')||me(), txnDate:val('rq-date')||nowDate(),
     remarks:val('rq-remarks'), status:'PENDING', items:clone(reqDraftItems), createdAt:nowStamp() };
   state.requests.push(r); reqDraftItems=[]; save(); closeModal(); go('requests'); toast('Request '+r.id+' submitted for approval');
 }
@@ -568,7 +644,7 @@ function openReviewRequest(id:string){
 }
 function rejectRequest(id:string){
   const r=state.requests.find(x=>x.id===id); if(!r) return;
-  r.status='REJECTED'; r.reviewedBy=state.settings.user; r.reviewedAt=nowStamp(); r.reviewNote=val('rv-note');
+  r.status='REJECTED'; r.reviewedBy=me(); r.reviewedAt=nowStamp(); r.reviewNote=val('rv-note');
   save(); closeModal(); renderSidebar(); renderView(); toast('Request '+r.id+' rejected');
 }
 function approveRequest(id:string){
@@ -584,9 +660,9 @@ function approveRequest(id:string){
   if(!items.length) return toast('Approve at least one quantity (or Reject)');
   const t:Transfer={ id:nextId('TR-','transfers','id'), docType:'DC', docNo:r.id.replace('REQ-','REQ'), txnDate:nowDate(),
     from:CENTRAL_ID(), to:SITE_ID(), remarks:'Against request '+r.id, status:'DRAFT', items:clone(items),
-    createdBy:state.settings.user, createdAt:nowStamp() };
+    createdBy:me(), createdAt:nowStamp() };
   state.transfers.push(t);
-  r.status='APPROVED'; r.reviewedBy=state.settings.user; r.reviewedAt=nowStamp(); r.reviewNote=val('rv-note'); r.transferId=t.id;
+  r.status='APPROVED'; r.reviewedBy=me(); r.reviewedAt=nowStamp(); r.reviewNote=val('rv-note'); r.transferId=t.id;
   save(); closeModal(); openTransfer(t.id); toast('Approved — transfer '+t.id+' created, ready to dispatch');
 }
 
@@ -643,7 +719,7 @@ function transferDetailHTML(id:string){
       <table class="mv-table rc-tbl"><thead><tr><th>Code</th><th>Material</th><th class="n">Outstanding</th><th>Accepted</th><th>Damaged</th><th>Short</th><th>Need More</th></tr></thead><tbody>${erows}</tbody></table>
       <div class="grid2" style="margin-top:14px">
         <div class="fld"><label>Receipt Date</label><input class="f" id="rc-date" type="date" value="${nowDate()}"></div>
-        <div class="fld"><label>Received By</label><input class="f" id="rc-by" value="${esc(state.settings.user)}"></div>
+        <div class="fld"><label>Received By</label><input class="f" id="rc-by" value="${esc(me())}"></div>
         <div class="fld col2"><label>Remarks</label><input class="f" id="rc-remarks" placeholder="Condition, discrepancy notes…"></div>
       </div>
       <div class="m-foot" style="border:0;padding:0"><button class="btn" onclick="submitReceipt('${jsid(t.id)}')">${svg(IC.check)} Submit Receipt Confirmation</button></div>
@@ -693,7 +769,7 @@ function submitResend(id:string){
   if(!items.length) return toast('Enter a resend quantity for at least one material');
   const nt:Transfer={ id:nextId('TR-','transfers','id'), docType:t.docType, docNo:t.docNo+'-R', txnDate:nowDate(),
     from:CENTRAL_ID(), to:t.to, remarks:'Replacement for '+t.id, status:'DRAFT', items:clone(items),
-    createdBy:state.settings.user, createdAt:nowStamp() };
+    createdBy:me(), createdAt:nowStamp() };
   state.transfers.push(nt); save(); closeModal(); openTransfer(nt.id); toast('Replacement draft '+nt.id+' created — ready to dispatch');
 }
 function receiptsPanel(t:Transfer){
@@ -757,14 +833,14 @@ function saveTransfer(){
   const from=CENTRAL_ID();
   if(from===to) return toast('Source and destination must differ');
   const t:Transfer={ id:nextId('TR-','transfers','id'), docType, docNo, txnDate:val('t-date')||nowDate(), from, to,
-    remarks:val('t-remarks'), status:'DRAFT', items:clone(draftItems), createdBy:state.settings.user, createdAt:nowStamp() };
+    remarks:val('t-remarks'), status:'DRAFT', items:clone(draftItems), createdBy:me(), createdAt:nowStamp() };
   state.transfers.push(t); draftItems=[]; save(); closeModal(); openTransfer(t.id); toast('Draft '+t.id+' created');
 }
 function dispatchTransfer(id:string){
   const t=state.transfers.find(x=>x.id===id); if(!t||t.status!=='DRAFT') return;
   for(const it of t.items){ const avail=onHand(it.code,t.from); if(it.qty>avail) return toast(`Insufficient stock for ${it.code}: need ${num(it.qty)}, have ${num(avail)}`); }
   for(const it of t.items) addMovement({code:it.code,qty:it.qty,from:t.from,to:'TRANSIT',type:'DISPATCH',ref:t.id,txnDate:t.txnDate});
-  t.status='PENDING'; t.dispatchedBy=state.settings.user; t.dispatchedAt=nowStamp();
+  t.status='PENDING'; t.dispatchedBy=me(); t.dispatchedAt=nowStamp();
   save(); renderView(); renderSidebar(); toast('Dispatched — '+num(transferDispatched(t))+' units now in transit');
 }
 function cancelTransfer(id:string){
@@ -808,7 +884,7 @@ function receiptConfirmHTML(id:string){
   <div class="panel pad"><table class="mv-table rc-tbl"><thead><tr><th>Code</th><th>Material</th><th class="n">Outstanding</th><th>Accepted</th><th>Damaged</th><th>Short</th><th>Need More</th></tr></thead><tbody>${rows||'<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">Nothing outstanding</td></tr>'}</tbody></table>
     <div class="grid2" style="margin-top:14px">
       <div class="fld"><label>Receipt Date</label><input class="f" id="rc-date" type="date" value="${nowDate()}"></div>
-      <div class="fld"><label>Received By</label><input class="f" id="rc-by" value="${esc(state.settings.user)}"></div>
+      <div class="fld"><label>Received By</label><input class="f" id="rc-by" value="${esc(me())}"></div>
       <div class="fld col2"><label>Remarks</label><input class="f" id="rc-remarks" placeholder="Condition, discrepancy notes…"></div>
     </div>
     <div class="m-foot" style="border:0;padding:0"><button class="btn" onclick="submitReceipt('${jsid(t.id)}')">${svg(IC.check)} Submit Receipt Confirmation</button></div>
@@ -831,7 +907,7 @@ function submitReceipt(id:string){
   if(!items.length && !needMore.length) return toast('Enter a received quantity or a Need More quantity');
   if(!items.length && needMore.length){ raiseNeedMore(t,needMore); return go('receipts'); }
   const r:Receipt={ id:nextId('RC-','receipts','id'), transferId:t.id, receiptNo:'GRN-'+String(state.receipts.length+1).padStart(4,'0'),
-    receivedBy:val('rc-by')||state.settings.user, txnDate:val('rc-date')||nowDate(), confirmedAt:nowStamp(), remarks:val('rc-remarks'), items };
+    receivedBy:val('rc-by')||me(), txnDate:val('rc-date')||nowDate(), confirmedAt:nowStamp(), remarks:val('rc-remarks'), items };
   state.receipts.push(r);
   for(const it of items){
     if(it.accepted>0) addMovement({code:it.code,qty:it.accepted,from:'TRANSIT',to:t.to,type:'RECEIPT',ref:t.id,txnDate:r.txnDate,person:r.receivedBy});
@@ -847,7 +923,7 @@ function submitReceipt(id:string){
 }
 /** Raise a fresh Material Request to the store for extra quantity the site needs. */
 function raiseNeedMore(t:Transfer, needMore:RequestItem[], silent=false){
-  const r:MaterialRequest={ id:nextId('REQ-','requests','id'), requestedBy:state.settings.user, txnDate:nowDate(),
+  const r:MaterialRequest={ id:nextId('REQ-','requests','id'), requestedBy:me(), txnDate:nowDate(),
     remarks:'Additional requirement raised at receipt of '+t.id+(val('rc-remarks')?(' — '+val('rc-remarks')):''),
     status:'PENDING', items:clone(needMore), createdAt:nowStamp() };
   state.requests.push(r);
@@ -870,8 +946,8 @@ function submitResolve(id:string){
   for(const tr of Array.from(trs)){
     const code=(tr as HTMLElement).dataset.code!; const act=(tr.querySelector('.rs-act') as HTMLSelectElement).value;
     const out=Math.max(0,itemOutstanding(t,code)); if(out<=0||act==='keep') continue;
-    if(act==='loss') addMovement({code,qty:out,from:'TRANSIT',to:'LOSS',type:'SHORT',ref:t.id,txnDate:nowDate(),person:state.settings.user});
-    if(act==='return') addMovement({code,qty:out,from:'TRANSIT',to:t.from,type:'SHORT',ref:t.id,txnDate:nowDate(),person:state.settings.user});
+    if(act==='loss') addMovement({code,qty:out,from:'TRANSIT',to:'LOSS',type:'SHORT',ref:t.id,txnDate:nowDate(),person:me()});
+    if(act==='return') addMovement({code,qty:out,from:'TRANSIT',to:t.from,type:'SHORT',ref:t.id,txnDate:nowDate(),person:me()});
     n++;
   }
   save(); closeModal(); renderView(); renderSidebar(); toast(n?'Discrepancy resolved':'Kept in transit');
@@ -1038,6 +1114,20 @@ function reportLetterhead(title:string){
     <div class="lh-meta"><div class="lh-title">${esc(title)}</div><div class="lh-sub">${isStore()?'Store Manager':'Site Manager'} view · Generated ${nowStamp()}</div></div>
   </div>`;
 }
+/** Sleek company brand strip shown at the top of every module. */
+function brandBanner(){
+  const c=central()?central()!.name:'Central Store', s=sites()[0]?sites()[0].name:'Site';
+  return `<div class="brandbar">
+    <div class="bb-left">
+      ${brandLogo(34)}
+      <b class="bb-ql">Qualtech<span>Engineers Pvt. Ltd.</span></b>
+    </div>
+    <div class="bb-right">
+      <span class="bb-pill">${esc(c)} <span class="bb-arrow">→</span> ${esc(s)}</span>
+      <span class="bb-pill soft">Phase 1 Pilot</span>
+    </div>
+  </div>`;
+}
 let repPeriod:'day'|'week'='week';
 let repType:'transfers'|'losses'='transfers';
 let repDate=nowDate();
@@ -1151,7 +1241,7 @@ function settingsHTML(){
   return `${pageTop('Settings','Business configuration for the pilot')}
   <div class="panel pad" style="max-width:560px">
     <div class="fld"><label>Application Name</label><input class="f" id="s-company" value="${esc(state.settings.company)}"></div>
-    <div class="fld"><label>Current User</label><input class="f" id="s-user" value="${esc(state.settings.user)}"></div>
+    <div class="fld"><label>Current User</label><input class="f" id="s-user" value="${esc(me())}"></div>
     <div class="fld"><label>Low-stock Alert Threshold (Central Store)</label><input class="f" id="s-low" type="number" min="0" value="${state.settings.lowStock}"></div>
     <div class="m-foot" style="border:0;padding:12px 0 0"><button class="btn" onclick="saveSettings()">Save Settings</button></div>
   </div>
@@ -1161,13 +1251,59 @@ function settingsHTML(){
     <button class="btn danger" onclick="if(confirm('Reset all demo data?'))resetData()">${svg(IC.trash)} Reset Demo Data</button>
   </div>`;
 }
-function saveSettings(){ state.settings.company=val('s-company')||state.settings.company; state.settings.user=val('s-user')||state.settings.user; state.settings.lowStock=numVal('s-low'); save(); renderTopbar(); renderView(); toast('Settings saved'); }
+function saveSettings(){ state.settings.company=val('s-company')||state.settings.company; state.settings.lowStock=numVal('s-low'); save(); renderTopbar(); renderView(); toast('Settings saved'); }
 
 /* ===========================================================
    BOOT
    =========================================================== */
+function togglePass(){ const i=document.getElementById('lg-pass') as HTMLInputElement; if(!i) return; const show=i.type==='password'; i.type=show?'text':'password'; const b=document.getElementById('lg-eye'); if(b) b.innerHTML=svg(show?IC.eyeoff:IC.eye); }
+function loginHTML(){
+  return `<div class="login-split">
+    <div class="login-hero">
+      <div class="lh-band"></div><div class="lh-diagonal"></div>
+      <div class="lh-top">
+        ${brandLogo(40)}<b class="lh-ql">Qualtech<span>Engineers Pvt. Ltd.</span></b>
+        <div class="lh-vdiv"></div>
+        <div class="lh-eyebrow">Inventory<br>Transfer<br>Tracking</div>
+      </div>
+      <div class="lh-inner">
+        <div class="lh-accent"></div>
+        <h1>Material<br>Transfer &amp;<br>Inventory System</h1>
+        <p>Track materials, transfers and stock across locations.</p>
+        <div class="lh-feats">
+          <div class="lh-feat">${svg(IC.materials)}<span>Inventory<br>Control</span></div>
+          <div class="lh-sep"></div>
+          <div class="lh-feat">${svg(IC.transfers)}<span>Material<br>Transfers</span></div>
+          <div class="lh-sep"></div>
+          <div class="lh-feat">${svg(IC.reports)}<span>Stock<br>Visibility</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="login-panel"><div class="login-card2">
+      <h2>Sign in to continue</h2>
+      <p class="login-sub">Material Transfer &amp; Inventory System &nbsp;·&nbsp; Phase 1 Pilot</p>
+      <div class="fld"><label>Username</label><div class="inp"><span class="inp-ic">${svg(IC.user)}</span><input class="f" id="lg-user" placeholder="store or site" onkeydown="if(event.key==='Enter')doLogin()"></div></div>
+      <div class="fld"><label>Password</label><div class="inp"><span class="inp-ic">${svg(IC.lock)}</span><input class="f" id="lg-pass" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"><button class="inp-eye" id="lg-eye" onclick="togglePass()">${svg(IC.eye)}</button></div></div>
+      <button class="btn red login-btn" onclick="doLogin()">${svg(IC.logout)} Sign In</button>
+      <div class="login-or">OR SIGN IN AS</div>
+      <button class="role-card" onclick="loginAs('store')"><div class="rc-ic red">${svg(IC.warehouse)}</div><div class="rc-t"><b>Store Manager</b><span>Mariappan · Central Store</span></div>${svg(IC.cright,18)}</button>
+      <button class="role-card" onclick="loginAs('site')"><div class="rc-ic blue">${svg(IC.locations)}</div><div class="rc-t"><b>Site Manager</b><span>M. Mariappan · Pilot Site</span></div>${svg(IC.cright,18)}</button>
+      <div class="login-foot">Demo credentials — <b>store</b> / store123 &nbsp;·&nbsp; <b>site</b> / site123</div>
+    </div></div>
+  </div>`;
+}
+function showLogin(){
+  document.body.classList.add('logged-out');
+  document.getElementById('sidebar')!.innerHTML=''; document.getElementById('topbar')!.innerHTML='';
+  document.getElementById('app')!.innerHTML=loginHTML();
+}
 function boot(){
-  try{ initTheme(); renderSidebar(); renderTopbar(); renderView(); }
+  try{
+    initTheme();
+    if(!session){ showLogin(); return; }
+    document.body.classList.remove('logged-out');
+    renderSidebar(); renderTopbar(); renderView();
+  }
   catch(err){ console.error('boot failed:',err); const el=document.getElementById('app'); if(el) el.innerHTML=renderErrorHTML('startup',err); }
 }
 if(!window.qtDeferBoot){ if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot(); }

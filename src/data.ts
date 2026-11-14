@@ -61,7 +61,7 @@ const SEED: MTState = {
   movements: buildOpeningMovements(),
   settings: {
     company: 'Material Transfer & Inventory Tracking',
-    user: 'R. Suresh',
+    user: 'Mariappan',
     role: 'store',
     lowStock: 50,
     readNotes: [],
