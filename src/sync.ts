@@ -19,7 +19,7 @@
    ============================================================ */
 'use strict';
 
-const SYNC_BUILD = '86';
+const SYNC_BUILD = '92';
 const SYNC_SCRIPTS = ['data', 'app'];
 /** must match the *_LS keys in the app and STORE_KEYS on the server */
 const SYNC_KEYS = ['mtts-v1'];
@@ -142,7 +142,7 @@ function syncLoadScripts(done: () => void) {
 
 /** First run on a new server: upload the data the app just loaded, so everyone starts from the same copy. */
 function syncUploadMissing() {
-  const live: Record<string, unknown> = { 'mtts-v1': state };
+  const live: Record<string, unknown> = { 'mtts-v1': store };
   for (const key of SYNC_KEYS) if (!syncVersions[key] && live[key]) syncPending[key] = live[key];
   Object.keys(syncPending).forEach(syncFlush);
 }

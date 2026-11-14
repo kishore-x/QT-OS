@@ -28,6 +28,8 @@ const IC: Record<string,string> = {
   reports:'<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',
   dots:'<circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/>',
   user:'<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  users:'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  office:'<path d="M3 21V7l9-4 9 4v14"/><path d="M3 21h18"/><path d="M9 21v-5h6v5"/><path d="M8 10h.01M12 10h.01M16 10h.01"/>',
   lock:'<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
   eye:'<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>',
   eyeoff:'<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M1 1l22 22"/>',
@@ -50,10 +52,18 @@ const IC: Record<string,string> = {
 const ICsun='<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
 const ICmoon='<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>';
 
-/* ---------- state ---------- */
+/* ---------- state (multi-site workspaces) ---------- */
 const LS='mtts-v1';
 const clone=<T,>(o:T):T=>JSON.parse(JSON.stringify(o));
-function load(): MTState { try{ const r=localStorage.getItem(LS); if(r){ const s=JSON.parse(r); return migrate(s); } }catch{} return clone(SEED); }
+interface Workspace { id:string; name:string; data:MTState }
+interface AppUser { id:string; username:string; password:string; name:string; role:Role; allowedSites:string[]|'all' }
+interface Store { workspaces:Workspace[]; currentWs:string; users?:AppUser[] }
+const ROLE_TITLE:Record<Role,string>={ purchase:'Purchase Manager', store:'Storekeeper', site:'Site Manager' };
+function seedUsers(firstWsId:string):AppUser[]{ return [
+  { id:'U-PUR', username:'purchase', password:'purchase123', name:'Head Office',  role:'purchase', allowedSites:'all' },
+  { id:'U-STO', username:'store',    password:'store123',    name:'Mariappan',    role:'store',    allowedSites:[firstWsId] },
+  { id:'U-SIT', username:'site',     password:'site123',     name:'M. Mariappan', role:'site',     allowedSites:[firstWsId] },
+]; }
 function migrate(s: any): MTState {
   s.materials=s.materials||[]; s.locations=s.locations||[]; s.requests=s.requests||[]; s.transfers=s.transfers||[];
   s.receipts=s.receipts||[]; s.movements=s.movements||[];
@@ -61,9 +71,73 @@ function migrate(s: any): MTState {
   if(!Array.isArray(s.settings.readNotes)) s.settings.readNotes=[];
   return s as MTState;
 }
-function save(){ try{ localStorage.setItem(LS, JSON.stringify(state)); }catch{} if(typeof syncPush==='function') syncPush(LS, state); }
-function resetData(){ state=clone(SEED); save(); go('dashboard'); toast('Demo data reset'); }
-let state: MTState = load();
+function migrateStore(o:any): Store {
+  let st:Store;
+  if(o && Array.isArray(o.workspaces)){
+    o.workspaces.forEach((w:any)=>{ w.data=migrate(w.data||{}); });
+    if(!o.currentWs || !o.workspaces.find((w:Workspace)=>w.id===o.currentWs)) o.currentWs=o.workspaces[0]?.id;
+    st=o as Store;
+  } else {
+    // old single-dataset shape → wrap as the first workspace
+    st={ workspaces:[{id:'ws-1', name:'Qualtech Pilot', data:migrate(o||{})}], currentWs:'ws-1' };
+  }
+  if(!Array.isArray(st.users) || !st.users.length) st.users=seedUsers(st.workspaces[0]?.id||'ws-1');
+  return st;
+}
+function loadStore(): Store {
+  try{ const r=localStorage.getItem(LS); if(r) return migrateStore(JSON.parse(r)); }catch{}
+  return { workspaces:[{id:'ws-1', name:'Qualtech Pilot', data:clone(SEED)}], currentWs:'ws-1', users:seedUsers('ws-1') };
+}
+let store: Store = loadStore();
+const curWs=()=>store.workspaces.find(w=>w.id===store.currentWs)||store.workspaces[0];
+const wsName=()=>curWs()?curWs().name:'Site';
+let state: MTState = curWs().data;
+function save(){ try{ localStorage.setItem(LS, JSON.stringify(store)); }catch{} if(typeof syncPush==='function') syncPush(LS, store); }
+function resetData(){ const w=curWs(); w.data=clone(SEED); state=w.data; save(); go('dashboard'); toast('Demo data reset'); }
+function switchWs(id:string){ const w=store.workspaces.find(x=>x.id===id); if(!w) return; if(!allowedWsIds().includes(id)) return toast('You do not have access to that site'); store.currentWs=id; state=w.data; save(); view='dashboard'; curTransfer=''; closeModal(); renderSidebar(); renderTopbar(); renderView(); toast('Switched to '+w.name); }
+function addSite(siteName:string, centralName:string){
+  const id='ws-'+Date.now().toString(36);
+  const data:MTState={ materials:[], locations:[
+      { id:'CST-01', code:'LOC-001', name:centralName||'Central Store', type:'store', person:'', contact:'', address:'', active:true },
+      { id:'SITE-01', code:'LOC-002', name:siteName, type:'site', person:'', contact:'', address:'', active:true },
+    ], requests:[], transfers:[], receipts:[], movements:[], settings:clone(SEED.settings) };
+  store.workspaces.push({id, name:siteName, data}); store.currentWs=id; state=data;
+  // grant the creator access to the new site (purchase already sees all)
+  const u=(store.users||[]).find(x=>x.id===session?.userId);
+  if(u && u.allowedSites!=='all') u.allowedSites=[...u.allowedSites, id];
+  save(); view='master'; curTransfer=''; closeModal(); renderSidebar(); renderTopbar(); renderView();
+  toast('New site "'+siteName+'" created — add materials to begin');
+}
+function openSiteSwitcher(){
+  const list=allowedWorkspaces();
+  const canDel=(isPurchase()||isStore()) && store.workspaces.length>1;
+  const rows=list.map(w=>`<div class="ws-row ${w.id===store.currentWs?'on':''}">
+    <button class="ws-pick" onclick="switchWs('${jsid(w.id)}')">${svg(IC.locations,16)} <span class="ws-nm">${esc(w.name)}</span>${w.id===store.currentWs?'<span class="ws-cur">Current</span>':''}</button>
+    ${canDel?`<button class="ws-del" title="Delete site" onclick="deleteSiteConfirm('${jsid(w.id)}')">${svg(IC.trash,15)}</button>`:''}
+  </div>`).join('');
+  const sub=isPurchase()?'All sites — Head Office view':(list.length>1?'You can access '+list.length+' sites':'Switch or add a site');
+  openModal(`<div class="modal" style="width:min(400px,92vw)">${mh(IC.locations,'Sites / Projects',sub)}
+    <div class="m-body" style="padding:10px">${rows}
+      ${(isPurchase()||isStore())?`<button class="menu-row add" onclick="closeModal();openAddSite()">${svg(IC.plus,16)} Add New Site</button>`:''}
+    </div></div>`);
+}
+function deleteSiteConfirm(id:string){ const w=store.workspaces.find(x=>x.id===id); if(!w) return; if(confirm('Delete site "'+w.name+'" and all its data? This cannot be undone.')) deleteSite(id); }
+function deleteSite(id:string){
+  if(store.workspaces.length<=1) return toast('At least one site is required');
+  const w=store.workspaces.find(x=>x.id===id); if(!w) return;
+  if(id===store.currentWs){ const other=store.workspaces.find(x=>x.id!==id)!; store.currentWs=other.id; state=other.data; view='dashboard'; curTransfer=''; }
+  store.workspaces=store.workspaces.filter(x=>x.id!==id);
+  save(); renderSidebar(); renderTopbar(); renderView(); openSiteSwitcher(); toast('Site "'+w.name+'" removed');
+}
+function openAddSite(){
+  openModal(`<div class="modal">${mh(IC.plus,'Add New Site','A fresh, empty site with all the same modules')}
+    <div class="m-body"><div class="grid2">
+      <div class="fld col2"><label>Site name <span class="req">*</span></label><input class="f" id="ns-site" placeholder="e.g. Site 2 · Chennai Project"></div>
+      <div class="fld col2"><label>Central store name</label><input class="f" id="ns-central" value="Central Store"></div>
+    </div><div class="hint">${svg(IC.alert,14)} The new site starts empty. Go to <b>Master Items</b> to add materials & opening stock, then begin transfers.</div></div>
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitAddSite()">Create Site</button></div></div>`);
+}
+function submitAddSite(){ const n=val('ns-site'); if(!n) return toast('Enter a site name'); addSite(n, val('ns-central')); }
 
 /* ---------- lookups ---------- */
 const material=(c:string)=>state.materials.find(m=>m.code===c);
@@ -130,31 +204,38 @@ function toast(msg:string){ const t=document.getElementById('toast'); if(!t) ret
 function esc(s:any){ return String(s==null?'':s).replace(/[&<>"'`]/g,c=>(({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','`':'&#96;'} as any)[c])); }
 function jsid(s:any){ return String(s==null?'':s).replace(/[^A-Za-z0-9 _.\/:-]/g,''); }
 
-/* ---------- roles ---------- */
-/* ---------- auth / sessions (per browser, local) ---------- */
-interface Session { name:string; role:Role; title:string; }
-const USERS:{u:string;pw:string;name:string;role:Role;title:string}[]=[
-  { u:'store', pw:'store123', name:'Mariappan',     role:'store', title:'Store Manager' },
-  { u:'site',  pw:'site123',  name:'M. Mariappan',  role:'site',  title:'Site Manager'  },
-];
+/* ---------- auth / sessions / roles (per browser, local) ---------- */
+interface Session { userId:string; name:string; role:Role; title:string; allowedSites:string[]|'all'; }
 const SESS_LS='mtts-session';
 let session: Session|null = (()=>{ try{ const r=localStorage.getItem(SESS_LS); if(r) return JSON.parse(r); }catch{} return null; })();
 function saveSession(){ try{ session?localStorage.setItem(SESS_LS,JSON.stringify(session)):localStorage.removeItem(SESS_LS); }catch{} }
-function me(){ return session?session.name:me(); }
-const role=()=>session?session.role:(state.settings.role||'store');
+function me(){ return session?session.name:(state?state.settings.user:'User'); }
+const role=()=>session?session.role:'store';
 const isStore=()=>role()==='store';
 const isSite=()=>role()==='site';
+const isPurchase=()=>role()==='purchase';
+const canApprove=()=>isStore()||isPurchase();      // approve material requests
+const canManageUsers=()=>isPurchase();
+const canManageStock=()=>isStore();                // add/edit materials, dispatch, adjust
+/** workspace ids this session may access */
+function allowedWsIds(){ if(!session) return store.workspaces.map(w=>w.id); return session.allowedSites==='all'?store.workspaces.map(w=>w.id):session.allowedSites; }
+function allowedWorkspaces(){ const ids=new Set(allowedWsIds()); return store.workspaces.filter(w=>ids.has(w.id)); }
+
 function doLogin(){
   const u=val('lg-user').toLowerCase(), pw=val('lg-pass');
-  const acc=USERS.find(x=>x.u===u && x.pw===pw);
+  const acc=(store.users||[]).find(x=>x.username.toLowerCase()===u && x.password===pw);
   if(!acc) return toast('Invalid username or password');
-  loginAs(acc.role);
+  loginUser(acc);
 }
-function loginAs(r:Role){
-  const acc=USERS.find(x=>x.role===r)!; session={name:acc.name,role:acc.role,title:acc.title}; saveSession();
+function loginUser(acc:AppUser){
+  session={ userId:acc.id, name:acc.name, role:acc.role, title:ROLE_TITLE[acc.role], allowedSites:acc.allowedSites };
+  saveSession();
+  // make sure the active site is one this user may access
+  const ids=allowedWsIds(); if(!ids.includes(store.currentWs) && ids.length){ store.currentWs=ids[0]; state=curWs().data; }
   view='dashboard'; curTransfer=''; document.body.classList.remove('logged-out'); boot();
-  toast('Signed in as '+acc.title);
+  toast('Signed in as '+session.title);
 }
+function loginAs(r:Role){ const acc=(store.users||[]).find(x=>x.role===r); if(acc) loginUser(acc); }
 function logout(){ session=null; saveSession(); view='dashboard'; boot(); }
 
 /* ---------- site notes / notifications (receipt remarks surfaced to the store) ---------- */
@@ -189,7 +270,7 @@ function navGroups(): [string, [string,string][]][]{
     ['INVENTORY', [['master','Master Items'],['stock','Current Stock'],['locations','Locations']]],
     ['OPERATIONS', [['requests','Material Requests'],['transfers','Material Transfers'],['receipts','Receipt Confirmation']]],
     ['TRACKING', [['notes','Notifications'],['losses','Loss Register'],['reports','Reports'],['history','Movement History']]],
-    ['SYSTEM', [['settings','Settings']]],
+    ['SYSTEM', (canManageUsers()?[['users','User Management'] as [string,string]]:[]).concat([['settings','Settings']])],
   ];
   if(isSite()){
     const allow=new Set(['dashboard','requests','receipts','stock','losses','reports','history']);
@@ -212,12 +293,13 @@ function renderSidebar(){
     ${items.map(n=>`<button class="nav-item ${view===n[0]?'active':''}" onclick="go('${n[0]}')">${svg(IC[n[0]]||IC.dashboard)}<span>${n[1]}</span>${badge(n[0])}</button>`).join('')}`).join('');
   document.getElementById('sidebar')!.innerHTML=`
     <div class="logo">${brandLogo(34)}<b class="ql">Qualtech<span>Engineers Pvt. Ltd.</span></b></div>
+    ${(isPurchase()||isStore()||allowedWorkspaces().length>1)?`<button class="site-switch" onclick="openSiteSwitcher()" title="Switch / add site"><div class="ss-ic">${svg(IC.locations,16)}</div><div class="ss-t"><span>${isPurchase()?'HEAD OFFICE · SITE':'ACTIVE SITE'}</span><b>${esc(wsName())}</b></div>${svg(IC.chev,16)}</button>`:''}
     <nav class="nav">${sections}</nav>
     <div class="side-foot">v1.0 · Phase 1 Pilot · ${esc(central()?central()!.name:'')} → ${esc(sites()[0]?sites()[0].name:'')}</div>`;
 }
 function renderTopbar(){
   const dark=document.documentElement.getAttribute('data-theme')==='dark';
-  const u=me(), r=isStore()?'Store Manager':'Site Manager';
+  const u=me(), r=session?session.title:ROLE_TITLE[role()];
   const initials=u.split(' ').map(w=>w[0]).join('').slice(0,2);
   document.getElementById('topbar')!.innerHTML=`
     <div class="search">${svg(IC.search)}<input id="topSearch" placeholder="Search material, code or location…" value="${esc(qFilter)}" oninput="topSearch(this.value)"></div>
@@ -227,7 +309,7 @@ function renderTopbar(){
       <button class="user-chip" title="Sign out" onclick="logout()"><div class="avatar">${esc(initials)}</div><div class="u"><b>${esc(u)}</b><span>${esc(r)}</span></div>${svg(IC.chev,16)}</button>
     </div>`;
 }
-function switchRole(){ state.settings.role = isStore()?'site':'store'; save(); if(!navItems().some(n=>n[0]===view)) view='dashboard'; renderSidebar(); renderTopbar(); renderView(); toast('Now acting as '+(isStore()?'Store Manager':'Site Manager')); }
+function switchRole(){ state.settings.role = isStore()?'site':'store'; save(); if(!navItems().some(n=>n[0]===view)) view='dashboard'; renderSidebar(); renderTopbar(); renderView(); toast('Now acting as '+(isStore()?'Storekeeper':'Site Manager')); }
 function go(v:string){ if(!navItems().some(n=>n[0]===v)&&v!==v){} view=v; curTransfer=''; renderSidebar(); renderView(); window.scrollTo(0,0); }
 function openNotes(){
   const notes=siteNotes(); const read=state.settings.readNotes||[];
@@ -270,6 +352,7 @@ function renderView(){
       case 'losses':    el.innerHTML=lossesHTML(); break;
       case 'reports':   el.innerHTML=reportsHTML(); break;
       case 'history':   el.innerHTML=historyHTML(); break;
+      case 'users':     el.innerHTML=usersHTML(); break;
       case 'settings':  el.innerHTML=settingsHTML(); break;
       default: el.innerHTML=dashboardHTML();
     }
@@ -332,7 +415,7 @@ function dashboardHTML(){
         <div class="route-pills"><span class="pt-pill">${esc(c)} <span class="pt-arrow">${svg(IC.arrow,14)}</span> ${esc(s)}</span><span class="pt-pill soft">Phase 1 Pilot</span></div>
       </div>
     </div>
-    <p class="hero-sub">${isStore()?'Store Manager':'Site Manager'} overview — materials, transfers, receipts and stock movement.</p>
+    <p class="hero-sub">${isStore()?'Storekeeper':'Site Manager'} overview — materials, transfers, receipts and stock movement.</p>
     <div class="period-toggle"><button class="pt">This Month</button><button class="pt">Last 3 Months</button><button class="pt on">All Time</button></div>
   </div>`;
   const k=`<div class="lkpis">
@@ -571,11 +654,11 @@ let reqDraftItems:RequestItem[]=[];
 
 function requestsHTML(){
   const list=state.requests.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
-  const row=(r:MaterialRequest)=>`<tr onclick="${isStore()&&r.status==='PENDING'?`openReviewRequest('${jsid(r.id)}')`:(r.transferId?`openTransfer('${jsid(r.transferId)}')`:'')}" style="${(isStore()&&r.status==='PENDING')||r.transferId?'cursor:pointer':''}">
+  const row=(r:MaterialRequest)=>`<tr onclick="${canApprove()&&r.status==='PENDING'?`openReviewRequest('${jsid(r.id)}')`:(r.transferId?`openTransfer('${jsid(r.transferId)}')`:'')}" style="${(canApprove()&&r.status==='PENDING')||r.transferId?'cursor:pointer':''}">
       <td class="n b">${esc(r.id)}</td><td>${esc(r.txnDate)}</td><td>${esc(r.requestedBy)}</td>
       <td class="n">${r.items.length}</td><td class="n">${num(reqQty(r))}</td>
       <td>${reqChip(r.status)}</td><td>${r.transferId?`${esc(r.transferId)} ${reqLinkedStatus(r)}`:'<span style="color:var(--muted);font-size:12px">—</span>'}</td>
-      <td class="row-act">${isStore()&&r.status==='PENDING'?`<button class="btn sm" onclick="event.stopPropagation();openReviewRequest('${jsid(r.id)}')">Review</button>`:''}</td></tr>`;
+      <td class="row-act">${canApprove()&&r.status==='PENDING'?`<button class="btn sm" onclick="event.stopPropagation();openReviewRequest('${jsid(r.id)}')">Review</button>`:''}</td></tr>`;
   const title=isSite()?'Material Requests':'Material Requests — Approval Inbox';
   const sub=isSite()?'Raise a request for materials you need. The store reviews and approves it.':'Site requests awaiting your approval. Approving creates a dispatch transfer automatically.';
   const action=isSite()?`<button class="btn" onclick="openRequestForm()">${svg(IC.plus)} Request Materials</button>`:'';
@@ -1111,7 +1194,7 @@ function reportLetterhead(title:string){
   return `<div class="letterhead">
     <div class="lh-brand">${brandLogo(46)}<div><div class="lh-name">${esc(BRAND.name)}</div><div class="lh-tag">${esc(BRAND.tagline)}</div></div></div>
     <div class="lh-contact">${esc(BRAND.addr)}<br>${esc(BRAND.email)} · ${esc(BRAND.phone)}</div>
-    <div class="lh-meta"><div class="lh-title">${esc(title)}</div><div class="lh-sub">${isStore()?'Store Manager':'Site Manager'} view · Generated ${nowStamp()}</div></div>
+    <div class="lh-meta"><div class="lh-title">${esc(title)}</div><div class="lh-sub">${isStore()?'Storekeeper':'Site Manager'} view · Generated ${nowStamp()}</div></div>
   </div>`;
 }
 /** Sleek company brand strip shown at the top of every module. */
@@ -1237,6 +1320,65 @@ function historyHTML(){
 /* ===========================================================
    SETTINGS
    =========================================================== */
+/* ===========================================================
+   USER MANAGEMENT  (Purchase Manager / Head Office only)
+   =========================================================== */
+function siteNamesFor(u:AppUser){ if(u.allowedSites==='all') return 'All sites'; return store.workspaces.filter(w=>(u.allowedSites as string[]).includes(w.id)).map(w=>w.name).join(', ')||'—'; }
+function usersHTML(){
+  if(!canManageUsers()) return empty(IC.users,'Only the Purchase Manager (Head Office) can manage users.');
+  const rows=(store.users||[]).map(u=>`<tr>
+    <td class="n b">${esc(u.username)}</td><td>${esc(u.name)}</td>
+    <td><span class="chip ${u.role==='purchase'?'c-use':u.role==='store'?'c-normal':'c-ok'}"><i></i>${esc(ROLE_TITLE[u.role])}</span></td>
+    <td>${esc(siteNamesFor(u))}</td>
+    <td class="row-act">
+      <button class="ic-btn" title="Edit" onclick="openUserForm('${jsid(u.id)}')">${svg(IC.edit,15)}</button>
+      ${u.id!==session!.userId?`<button class="ic-btn" title="Delete" onclick="deleteUser('${jsid(u.id)}')">${svg(IC.trash,15)}</button>`:''}
+    </td></tr>`).join('');
+  return `${pageTop('User Management','Create logins and control which sites each person can access.', `<button class="btn" onclick="openUserForm()">${svg(IC.plus)} Add User</button>`)}
+  <div class="panel"><table><thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Sites</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="hint">${svg(IC.alert,14)} <b>Purchase Manager</b> sees all sites and can approve requests. <b>Storekeeper</b> & <b>Site Manager</b> are limited to the sites you tick — a storekeeper can be given access to two or more sites.</div>`;
+}
+function openUserForm(id?:string){
+  const u=id?(store.users||[]).find(x=>x.id===id):null;
+  const chk=(wid:string)=>{ if(!u) return ''; if(u.allowedSites==='all') return 'checked'; return (u.allowedSites as string[]).includes(wid)?'checked':''; };
+  const siteBoxes=store.workspaces.map(w=>`<label class="ck"><input type="checkbox" class="u-site" value="${esc(w.id)}" ${chk(w.id)}> ${esc(w.name)}</label>`).join('');
+  openModal(`<div class="modal">${mh(IC.users, u?'Edit User':'Add User', u?'Update login & site access':'Create a new login')}
+    <div class="m-body"><div class="grid2">
+      <div class="fld"><label>Username <span class="req">*</span></label><input class="f" id="u-username" value="${esc(u?u.username:'')}" ${u?'disabled':''}></div>
+      <div class="fld"><label>Password <span class="req">*</span></label><input class="f" id="u-password" value="${esc(u?u.password:'')}"></div>
+      <div class="fld col2"><label>Full name <span class="req">*</span></label><input class="f" id="u-name" value="${esc(u?u.name:'')}"></div>
+      <div class="fld col2"><label>Role</label><select class="f" id="u-role" onchange="userRoleChange()">
+        <option value="purchase" ${u&&u.role==='purchase'?'selected':''}>Purchase Manager (Head Office — all sites)</option>
+        <option value="store" ${!u||u.role==='store'?'selected':''}>Storekeeper (site store)</option>
+        <option value="site" ${u&&u.role==='site'?'selected':''}>Site Manager</option>
+      </select></div>
+      <div class="fld col2" id="u-sites-wrap"><label>Sites this user can access</label><div class="ck-grid">${siteBoxes}</div></div>
+    </div></div>
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="submitUser('${jsid(id||'')}')">${u?'Save':'Add User'}</button></div></div>`);
+  userRoleChange();
+}
+function userRoleChange(){ const r=val('u-role'); const wrap=document.getElementById('u-sites-wrap'); if(wrap) wrap.style.display=r==='purchase'?'none':''; }
+function submitUser(id:string){
+  const username=val('u-username'), password=val('u-password'), name=val('u-name'), r=val('u-role') as Role;
+  if(!username||!password||!name) return toast('Username, password and name are required');
+  const sites:string[]=Array.from(document.querySelectorAll('.u-site:checked')).map(e=>(e as HTMLInputElement).value);
+  const allowedSites:string[]|'all' = r==='purchase'?'all':sites;
+  if(r!=='purchase' && !sites.length) return toast('Tick at least one site for this user');
+  store.users=store.users||[];
+  if(id){ const i=store.users.findIndex(x=>x.id===id); store.users[i]={...store.users[i], password, name, role:r, allowedSites}; }
+  else {
+    if(store.users.some(x=>x.username.toLowerCase()===username.toLowerCase())) return toast('Username already exists');
+    store.users.push({ id:'U-'+Date.now().toString(36), username, password, name, role:r, allowedSites });
+  }
+  save(); closeModal(); renderView(); toast('User '+(id?'updated':'added'));
+}
+function deleteUser(id:string){
+  const u=(store.users||[]).find(x=>x.id===id); if(!u) return;
+  if((store.users||[]).filter(x=>x.role==='purchase').length<=1 && u.role==='purchase') return toast('Keep at least one Purchase Manager');
+  if(!confirm('Delete user "'+u.username+'"?')) return;
+  store.users=(store.users||[]).filter(x=>x.id!==id); save(); renderView(); toast('User removed');
+}
+
 function settingsHTML(){
   return `${pageTop('Settings','Business configuration for the pilot')}
   <div class="panel pad" style="max-width:560px">
@@ -1286,9 +1428,10 @@ function loginHTML(){
       <div class="fld"><label>Password</label><div class="inp"><span class="inp-ic">${svg(IC.lock)}</span><input class="f" id="lg-pass" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"><button class="inp-eye" id="lg-eye" onclick="togglePass()">${svg(IC.eye)}</button></div></div>
       <button class="btn red login-btn" onclick="doLogin()">${svg(IC.logout)} Sign In</button>
       <div class="login-or">OR SIGN IN AS</div>
-      <button class="role-card" onclick="loginAs('store')"><div class="rc-ic red">${svg(IC.warehouse)}</div><div class="rc-t"><b>Store Manager</b><span>Mariappan · Central Store</span></div>${svg(IC.cright,18)}</button>
+      <button class="role-card" onclick="loginAs('purchase')"><div class="rc-ic amber">${svg(IC.office)}</div><div class="rc-t"><b>Purchase Manager</b><span>Head Office · All sites</span></div>${svg(IC.cright,18)}</button>
+      <button class="role-card" onclick="loginAs('store')"><div class="rc-ic red">${svg(IC.warehouse)}</div><div class="rc-t"><b>Storekeeper</b><span>Mariappan · Central Store</span></div>${svg(IC.cright,18)}</button>
       <button class="role-card" onclick="loginAs('site')"><div class="rc-ic blue">${svg(IC.locations)}</div><div class="rc-t"><b>Site Manager</b><span>M. Mariappan · Pilot Site</span></div>${svg(IC.cright,18)}</button>
-      <div class="login-foot">Demo credentials — <b>store</b> / store123 &nbsp;·&nbsp; <b>site</b> / site123</div>
+      <div class="login-foot">Demo — <b>purchase</b>/purchase123 · <b>store</b>/store123 · <b>site</b>/site123</div>
     </div></div>
   </div>`;
 }

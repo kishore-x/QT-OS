@@ -10,7 +10,7 @@
      LOSS     -> short / lost in transit, written off on resolution (sink)
    ============================================================ */
 
-type Role = 'store' | 'site';                 // Store Manager / Site Manager
+type Role = 'purchase' | 'store' | 'site';    // Purchase Manager (HO) / Store Manager / Site Manager
 type LocType = 'store' | 'site';
 type DocType = 'DC' | 'MTN';
 type TransferStatus =

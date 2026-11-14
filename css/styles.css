@@ -1728,3 +1728,36 @@ body.logged-out .content{padding:0!important}
 /* KPI cards — black border */
 .lkpi{border:1px solid #111!important;border-radius:0!important}
 .lkpi[onclick]:hover{box-shadow:0 2px 0 #111}
+
+/* ===== Site switcher (sidebar) ===== */
+.site-switch{display:flex;align-items:center;gap:10px;width:calc(100% - 24px);margin:10px 12px 2px;padding:9px 11px;border:1px solid var(--lims-line,#e9edf3);border-radius:10px;background:#fff;cursor:pointer;font:inherit;transition:.14s}
+.site-switch:hover{background:#f8fafc;border-color:#cbd5e1}
+.site-switch .ss-ic{width:30px;height:30px;border-radius:8px;background:#FBE9E9;color:#D62828;display:grid;place-items:center;flex-shrink:0}
+.site-switch .ss-ic svg{width:16px;height:16px}
+.site-switch .ss-t{flex:1;text-align:left;line-height:1.1;min-width:0}
+.site-switch .ss-t span{display:block;font-size:9.5px;font-weight:700;letter-spacing:.08em;color:#94a3b8}
+.site-switch .ss-t b{display:block;font-size:13.5px;color:#0f172a;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.site-switch>svg{color:#94a3b8;width:16px;height:16px;flex-shrink:0}
+.menu-row.on{background:#FBE9E9;color:#D62828;font-weight:600}
+.menu-row.on svg{color:#D62828}
+.menu-row.add{color:#244BDB;font-weight:600;border-top:1px solid var(--line2);margin-top:6px;border-radius:0 0 9px 9px}
+.menu-row.add svg{color:#244BDB}
+.ws-cur{font-size:10px;font-weight:700;color:#16834A;background:#DDF5E8;border-radius:999px;padding:3px 8px}
+
+/* site switcher rows with delete */
+.ws-row{display:flex;align-items:center;gap:4px;margin-bottom:4px}
+.ws-row.on{background:#FBE9E9;border-radius:9px}
+.ws-pick{display:flex;align-items:center;gap:11px;flex:1;text-align:left;font:inherit;font-size:13.5px;font-weight:500;color:#334155;background:transparent;border:0;border-radius:9px;padding:11px 12px;cursor:pointer}
+.ws-pick:hover{background:#f1f5f9}
+.ws-row.on .ws-pick{color:#D62828;font-weight:600}
+.ws-row.on .ws-pick svg{color:#D62828}
+.ws-pick .ws-nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ws-del{width:34px;height:34px;border-radius:8px;border:1px solid var(--line2);background:#fff;color:#94a3b8;cursor:pointer;display:grid;place-items:center;flex-shrink:0}
+.ws-del:hover{background:#FBE0E0;color:#D62828;border-color:#f3c9c9}
+.ws-del svg{width:15px;height:15px}
+
+/* user management checkboxes + purchase login tile */
+.ck-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ck{display:flex;align-items:center;gap:8px;font-size:13px;color:#334155;padding:8px 10px;border:1px solid var(--line);border-radius:8px;cursor:pointer}
+.ck input{width:16px;height:16px;accent-color:#244BDB}
+.login-card2 .rc-ic.amber{background:#FFF0C2;color:#C77B0A}

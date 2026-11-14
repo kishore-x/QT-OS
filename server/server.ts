@@ -40,7 +40,7 @@ const MAX_BODY = 25 * 1024 * 1024;
     this stops a malformed or malicious payload from corrupting a shared store
     and breaking the app for every user. Must match the *_LS keys in src/. */
 const STORE_SHAPES: Record<string, string[]> = {
-  'mtts-v1': ['materials', 'locations', 'requests', 'transfers', 'receipts', 'movements'],  // app.ts
+  'mtts-v1': ['workspaces'],  // app.ts — multi-site store { workspaces:[{id,name,data}], currentWs }
 };
 const STORE_KEYS = new Set(Object.keys(STORE_SHAPES));
 
