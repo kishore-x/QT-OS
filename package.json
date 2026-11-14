@@ -10,12 +10,15 @@
     "start": "npm run build && node --disable-warning=ExperimentalWarning server/server.ts",
     "dev": "tsc -p tsconfig.json && (tsc -p tsconfig.json --watch --preserveWatchOutput & node --disable-warning=ExperimentalWarning --watch server/server.ts)"
   },
+  "dependencies": {
+    "@libsql/client": "^0.15.15"
+  },
   "devDependencies": {
     "@types/node": "^22.20.5",
     "typescript": "^5.9.3"
   },
   "type": "module",
   "engines": {
-    "node": ">=22.18"
+    "node": "22.x"
   }
 }
