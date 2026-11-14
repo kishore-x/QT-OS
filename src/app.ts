@@ -61,7 +61,7 @@ interface Store { workspaces:Workspace[]; currentWs:string; users?:AppUser[] }
 const ROLE_TITLE:Record<Role,string>={ purchase:'Purchase Manager', store:'Storekeeper', site:'Site Manager' };
 function seedUsers(firstWsId:string):AppUser[]{ return [
   { id:'U-PUR', username:'purchase', password:'purchase123', name:'Head Office',  role:'purchase', allowedSites:'all' },
-  { id:'U-STO', username:'store',    password:'store123',    name:'Mariappan',    role:'store',    allowedSites:[firstWsId] },
+  { id:'U-STO', username:'store',    password:'store123',    name:'R. Suresh',    role:'store',    allowedSites:[firstWsId] },
   { id:'U-SIT', username:'site',     password:'site123',     name:'M. Mariappan', role:'site',     allowedSites:[firstWsId] },
 ]; }
 function migrate(s: any): MTState {
@@ -144,7 +144,7 @@ const material=(c:string)=>state.materials.find(m=>m.code===c);
 const matName=(c:string)=>{ const m=material(c); return m?m.name:c; };
 const matUnit=(c:string)=>{ const m=material(c); return m?m.unit:''; };
 const loc=(id:string)=>state.locations.find(l=>l.id===id);
-const VIRTUAL:Record<string,string>={OPENING:'Opening',TRANSIT:'In Transit',DAMAGED:'Damaged',LOSS:'Loss / Short'};
+const VIRTUAL:Record<string,string>={OPENING:'Opening',TRANSIT:'In Transit',DAMAGED:'Damaged',LOSS:'Loss / Short',PURCHASE:'Head Office'};
 const locName=(id:string)=>VIRTUAL[id] || (loc(id)?loc(id)!.name:id);
 const central=()=>state.locations.find(l=>l.type==='store');
 const sites=()=>state.locations.filter(l=>l.type==='site');
@@ -214,9 +214,12 @@ const role=()=>session?session.role:'store';
 const isStore=()=>role()==='store';
 const isSite=()=>role()==='site';
 const isPurchase=()=>role()==='purchase';
-const canApprove=()=>isStore()||isPurchase();      // approve material requests
+const canApprove=()=>isPurchase();                 // Purchase Manager (office) approves & sends
+const canRequest=()=>isStore()||isSite();          // Storekeeper raises; Site Manager may also raise
+const canSend=()=>isPurchase();                    // Purchase Manager dispatches materials to the storekeeper
+const isReceiver=()=>isStore();                    // Storekeeper confirms receipt & records damage
 const canManageUsers=()=>isPurchase();
-const canManageStock=()=>isStore();                // add/edit materials, dispatch, adjust
+const canManageStock=()=>isStore()||isPurchase();  // add/edit materials, adjust
 /** workspace ids this session may access */
 function allowedWsIds(){ if(!session) return store.workspaces.map(w=>w.id); return session.allowedSites==='all'?store.workspaces.map(w=>w.id):session.allowedSites; }
 function allowedWorkspaces(){ const ids=new Set(allowedWsIds()); return store.workspaces.filter(w=>ids.has(w.id)); }
@@ -268,12 +271,13 @@ function navGroups(): [string, [string,string][]][]{
   let groups:[string,[string,string][]][]=[
     ['OVERVIEW', [['dashboard','Dashboard']]],
     ['INVENTORY', [['master','Master Items'],['stock','Current Stock'],['locations','Locations']]],
-    ['OPERATIONS', [['requests','Material Requests'],['transfers','Material Transfers'],['receipts','Receipt Confirmation']]],
+    ['OPERATIONS', [['requests','Material Requests'],['receipts','Receipt Confirmation']]],
     ['TRACKING', [['notes','Notifications'],['losses','Loss Register'],['reports','Reports'],['history','Movement History']]],
     ['SYSTEM', (canManageUsers()?[['users','User Management'] as [string,string]]:[]).concat([['settings','Settings']])],
   ];
   if(isSite()){
-    const allow=new Set(['dashboard','requests','receipts','stock','losses','reports','history']);
+    // Site Manager = overview of everything (read-only) + can raise a request
+    const allow=new Set(['dashboard','master','stock','requests','receipts','losses','reports','history']);
     groups=groups.map(([t,items])=>[t, items.filter(n=>allow.has(n[0]))] as [string,[string,string][]]).filter(g=>g[1].length);
   }
   return groups;
@@ -286,7 +290,7 @@ function renderSidebar(){
   const nav=navItems();
   const pend=pendingForSite();
   const unread=isStore()?unreadNotes().length:0;
-  const preq=isStore()?pendingRequests():0;
+  const preq=isPurchase()?pendingRequests():0;
   const badge=(k:string)=>{ if(k==='receipts'&&pend) return `<span class="nav-badge">${pend}</span>`; if(k==='notes'&&unread) return `<span class="nav-badge">${unread>9?'9+':unread}</span>`; if(k==='requests'&&preq) return `<span class="nav-badge">${preq}</span>`; return ''; };
   const sections=navGroups().map(([title,items])=>`
     <div class="nav-sec">${esc(title)}</div>
@@ -346,7 +350,7 @@ function renderView(){
       case 'stock':     el.innerHTML=stockHTML(); break;
       case 'locations': el.innerHTML=locationsHTML(); break;
       case 'requests':  el.innerHTML=requestsHTML(); break;
-      case 'transfers': el.innerHTML=curTransfer?transferDetailHTML(curTransfer):transfersHTML(); break;
+      case 'transfers': view='receipts'; el.innerHTML=curTransfer?receiptConfirmHTML(curTransfer):receiptsHTML(); break; // module removed → route to receipts
       case 'receipts':  el.innerHTML=curTransfer?receiptConfirmHTML(curTransfer):receiptsHTML(); break;
       case 'notes':     el.innerHTML=notesViewHTML(); markNotesRead(); renderSidebar(); renderTopbar(); break;
       case 'losses':    el.innerHTML=lossesHTML(); break;
@@ -415,7 +419,7 @@ function dashboardHTML(){
         <div class="route-pills"><span class="pt-pill">${esc(c)} <span class="pt-arrow">${svg(IC.arrow,14)}</span> ${esc(s)}</span><span class="pt-pill soft">Phase 1 Pilot</span></div>
       </div>
     </div>
-    <p class="hero-sub">${isStore()?'Storekeeper':'Site Manager'} overview — materials, transfers, receipts and stock movement.</p>
+    <p class="hero-sub">${esc(session?session.title:ROLE_TITLE[role()])} overview — materials, requests, receipts and stock movement.</p>
     <div class="period-toggle"><button class="pt">This Month</button><button class="pt">Last 3 Months</button><button class="pt on">All Time</button></div>
   </div>`;
   const k=`<div class="lkpis">
@@ -424,8 +428,8 @@ function dashboardHTML(){
     ${lkpi(num(Math.round(locationTotal(sId))),'Pilot Site Stock','Confirmed at site', IC.building,'stock')}
     ${lkpi(num(Math.round(totalTransit())),'In Transit','Dispatched, not received', IC.truck,'receipts')}
     ${lkpi(num(pend),'Pending Receipts','Awaiting confirmation', IC.receipts,'receipts')}
-    ${lkpi(num(isStore()?pendingRequests():state.requests.length),'Material Requests',isStore()?'Awaiting approval':'Raised', IC.requests,'requests')}
-    ${lkpi(num(completed),'Completed Transfers','Fully reconciled', IC.check,'transfers')}
+    ${lkpi(num(pendingRequests()),'Material Requests',isPurchase()?'Awaiting your approval':'Awaiting approval', IC.requests,'requests')}
+    ${lkpi(num(completed),'Completed Deliveries','Fully reconciled', IC.check,'receipts')}
     ${lkpi(num(totLoss),'Total Loss','Damaged / short units', IC.losses,'losses')}
   </div>`;
   const recentRows=recent.length?recent.map(t=>{
@@ -440,10 +444,10 @@ function dashboardHTML(){
     : `<div class="empty-state">${svg(IC.materials,34)}<b>No low-stock materials</b><span>All materials are within stock limits.</span></div>`;
   return `${hero}
   ${k}
-  ${isStore()?`<div class="xfer-row"><button class="btn dark" onclick="openTransferForm()">${svg(IC.plus)} New Transfer</button></div>`:''}
+  ${canRequest()?`<div class="xfer-row"><button class="btn dark" onclick="openRequestForm()">${svg(IC.plus)} Request Materials</button></div>`:(canSend()?`<div class="xfer-row"><button class="btn dark" onclick="go('requests')">${svg(IC.requests)} Review Requests</button></div>`:'')}
   <div class="dash-grid">
     <div class="panel pad">
-      <div class="panel-h"><span class="sec-accent"></span><b>Recent Transfers</b>${isStore()?`<a class="rt-link" onclick="go('transfers')">View All ${svg(IC.arrow,15)}</a>`:''}</div>
+      <div class="panel-h"><span class="sec-accent"></span><b>Recent Deliveries</b><a class="rt-link" onclick="go('receipts')">View All ${svg(IC.arrow,15)}</a></div>
       <table class="mv-table"><thead><tr><th>Transfer</th><th>Document</th><th>Route</th><th class="n">Qty</th><th>Status</th><th>Date</th></tr></thead><tbody>${recentRows}</tbody></table></div>
     <div class="panel pad"><div class="panel-h"><span class="sec-accent"></span><b>Low Stock · Central Store</b></div>
       ${lowPanel}
@@ -654,30 +658,31 @@ let reqDraftItems:RequestItem[]=[];
 
 function requestsHTML(){
   const list=state.requests.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
-  const row=(r:MaterialRequest)=>`<tr onclick="${canApprove()&&r.status==='PENDING'?`openReviewRequest('${jsid(r.id)}')`:(r.transferId?`openTransfer('${jsid(r.transferId)}')`:'')}" style="${(canApprove()&&r.status==='PENDING')||r.transferId?'cursor:pointer':''}">
+  const row=(r:MaterialRequest)=>`<tr onclick="${canApprove()&&r.status==='PENDING'?`openReviewRequest('${jsid(r.id)}')`:''}" style="${canApprove()&&r.status==='PENDING'?'cursor:pointer':''}">
       <td class="n b">${esc(r.id)}</td><td>${esc(r.txnDate)}</td><td>${esc(r.requestedBy)}</td>
       <td class="n">${r.items.length}</td><td class="n">${num(reqQty(r))}</td>
-      <td>${reqChip(r.status)}</td><td>${r.transferId?`${esc(r.transferId)} ${reqLinkedStatus(r)}`:'<span style="color:var(--muted);font-size:12px">—</span>'}</td>
+      <td>${reqChip(r.status)}</td><td>${r.reviewedBy?esc(r.reviewedBy)+' · '+esc(r.reviewedAt||''):'<span style="color:var(--muted);font-size:12px">—</span>'}</td>
       <td class="row-act">${canApprove()&&r.status==='PENDING'?`<button class="btn sm" onclick="event.stopPropagation();openReviewRequest('${jsid(r.id)}')">Review</button>`:''}</td></tr>`;
-  const title=isSite()?'Material Requests':'Material Requests — Approval Inbox';
-  const sub=isSite()?'Raise a request for materials you need. The store reviews and approves it.':'Site requests awaiting your approval. Approving creates a dispatch transfer automatically.';
-  const action=isSite()?`<button class="btn" onclick="openRequestForm()">${svg(IC.plus)} Request Materials</button>`:'';
+  const inbox=isPurchase();
+  const title=inbox?'Material Requests — Approval Inbox':'Material Requests';
+  const sub=inbox?'Requests awaiting your approval. Approving dispatches the materials to the storekeeper in one step.':(isSite()?'Raise a request to the Purchase Manager at the office. The storekeeper normally requests; you can raise one too.':'Request materials from the Purchase Manager at the office. Once approved they are sent to you to receive and check.');
+  const action=canRequest()?`<button class="btn" onclick="openRequestForm()">${svg(IC.plus)} Request Materials</button>`:'';
   const pend=state.requests.filter(r=>r.status==='PENDING');
   return `${pageTop(title,sub,action)}
-  ${isStore()&&pend.length?`<div class="hint">${svg(IC.alert,14)} <b>${pend.length}</b> request(s) awaiting your review.</div>`:''}
-  <div class="panel"><table><thead><tr><th>Request</th><th>Date</th><th>Requested By</th><th class="n">Items</th><th class="n">Qty</th><th>Status</th><th>Transfer</th><th></th></tr></thead>
+  ${inbox&&pend.length?`<div class="hint">${svg(IC.alert,14)} <b>${pend.length}</b> request(s) awaiting your approval.</div>`:''}
+  <div class="panel"><table><thead><tr><th>Request</th><th>Date</th><th>Requested By</th><th class="n">Items</th><th class="n">Qty</th><th>Status</th><th>Reviewed</th><th></th></tr></thead>
   <tbody>${list.length?list.map(row).join(''):`<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:28px">No requests yet</td></tr>`}</tbody></table></div>`;
 }
 
 /* ---- site: raise request ---- */
 function openRequestForm(){
   reqDraftItems=[];
-  openModal(`<div class="modal wide">${mh(IC.requests,'Request Materials','Ask the Central Store for the materials you need')}
+  openModal(`<div class="modal wide">${mh(IC.requests,'Request Materials','Ask Head Office (Purchase Manager) for materials')}
     <div class="m-body">
       <div class="grid2">
         <div class="fld"><label>Request Date</label><input class="f" id="rq-date" type="date" value="${nowDate()}"></div>
         <div class="fld"><label>Requested By</label><input class="f" id="rq-by" value="${esc(me())}"></div>
-        <div class="fld col2"><label>Remarks / Reason</label><input class="f" id="rq-remarks" placeholder="Needed for slab casting next week…"></div>
+        <div class="fld col2"><label>Remarks / Reason</label><input class="f" id="rq-remarks" placeholder="Low on cement, needed for next pour…"></div>
       </div>
       <div class="line-add">
         <select class="f" id="rqi-code">${state.materials.filter(m=>m.active).map(m=>`<option value="${m.code}">${esc(m.code)} — ${esc(m.name)}</option>`).join('')}</select>
@@ -706,24 +711,24 @@ function submitRequest(){
   if(!reqDraftItems.length) return toast('Add at least one material');
   const r:MaterialRequest={ id:nextId('REQ-','requests','id'), requestedBy:val('rq-by')||me(), txnDate:val('rq-date')||nowDate(),
     remarks:val('rq-remarks'), status:'PENDING', items:clone(reqDraftItems), createdAt:nowStamp() };
-  state.requests.push(r); reqDraftItems=[]; save(); closeModal(); go('requests'); toast('Request '+r.id+' submitted for approval');
+  state.requests.push(r); reqDraftItems=[]; save(); closeModal(); go('requests'); toast('Request '+r.id+' sent to Head Office for approval');
 }
 
 /* ---- store: review request ---- */
 function openReviewRequest(id:string){
   const r=state.requests.find(x=>x.id===id); if(!r) return;
-  const rows=r.items.map(it=>{ const avail=onHand(it.code,CENTRAL_ID());
+  const rows=r.items.map(it=>{ const cur=onHand(it.code,CENTRAL_ID());
     return `<tr data-code="${esc(it.code)}"><td class="n b">${esc(it.code)}</td><td>${esc(matName(it.code))}</td>
-      <td class="n">${num(it.qty)} ${esc(matUnit(it.code))}</td><td class="n ${avail<it.qty?'':''}" style="${avail<it.qty?'color:var(--red)':''}">${num(avail)}</td>
-      <td><input class="f rq-appr" type="number" min="0" max="${avail}" value="${Math.min(it.qty,avail)}" style="width:90px;padding:6px 8px"></td></tr>`; }).join('');
+      <td class="n">${num(cur)}</td><td class="n">${num(it.qty)} ${esc(matUnit(it.code))}</td>
+      <td><input class="f rq-appr" type="number" min="0" value="${it.qty}" style="width:90px;padding:6px 8px"></td></tr>`; }).join('');
   openModal(`<div class="modal wide">${mh(IC.requests,'Review Request · '+esc(r.id),'From '+esc(r.requestedBy)+' · '+esc(r.txnDate))}
     <div class="m-body">
       ${r.remarks?`<div class="src-note">Reason: ${esc(r.remarks)}</div>`:''}
-      <table class="mv-table"><thead><tr><th>Code</th><th>Material</th><th class="n">Requested</th><th class="n">Store Stock</th><th>Approve Qty</th></tr></thead><tbody>${rows}</tbody></table>
-      <div class="hint" style="margin-top:12px">${svg(IC.alert,14)} Approving creates a dispatch transfer for the approved quantities. You still confirm the dispatch afterwards. You can reduce quantities to match available stock.</div>
-      <div class="fld" style="margin-top:6px"><label>Note (optional)</label><input class="f" id="rv-note" placeholder="Partial approval — balance after next purchase…"></div>
+      <table class="mv-table"><thead><tr><th>Code</th><th>Material</th><th class="n">At store now</th><th class="n">Requested</th><th>Approve Qty</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="hint" style="margin-top:12px">${svg(IC.alert,14)} Approving dispatches the approved quantity to the storekeeper in one step. It goes into transit; their stock rises only after they confirm receipt. You can change the quantity before approving.</div>
+      <div class="fld" style="margin-top:6px"><label>Note (optional)</label><input class="f" id="rv-note" placeholder="Approved — balance after next purchase…"></div>
     </div>
-    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn danger" onclick="rejectRequest('${jsid(r.id)}')">Reject</button><button class="btn" onclick="approveRequest('${jsid(r.id)}')">${svg(IC.check)} Approve &amp; Create Transfer</button></div></div>`);
+    <div class="m-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn danger" onclick="rejectRequest('${jsid(r.id)}')">Reject</button><button class="btn" onclick="approveRequest('${jsid(r.id)}')">${svg(IC.check)} Approve &amp; Send Back</button></div></div>`);
 }
 function rejectRequest(id:string){
   const r=state.requests.find(x=>x.id===id); if(!r) return;
@@ -732,21 +737,25 @@ function rejectRequest(id:string){
 }
 function approveRequest(id:string){
   const r=state.requests.find(x=>x.id===id); if(!r) return;
-  const trs=document.querySelectorAll('#layer tr[data-code]'); const items:TransferItem[]=[];
+  const trs=document.querySelectorAll('#layer tr[data-code]'); let total=0; const items:TransferItem[]=[];
   for(const tr of Array.from(trs)){
     const code=(tr as HTMLElement).dataset.code!; const appr=Number((tr.querySelector('.rq-appr') as HTMLInputElement).value)||0;
-    const avail=onHand(code,CENTRAL_ID());
-    if(appr>avail) return toast(`${code}: approved ${num(appr)} exceeds store stock ${num(avail)}`);
     const it=r.items.find(x=>x.code===code); if(it) it.approvedQty=appr;
-    if(appr>0) items.push({code,qty:appr});
+    if(appr>0){ items.push({code,qty:appr}); total+=appr; }
   }
-  if(!items.length) return toast('Approve at least one quantity (or Reject)');
+  if(total<=0) return toast('Approve at least one quantity (or Reject)');
+  // Approve & Send in one step: Purchase Manager (office) dispatches the approved
+  // materials to the storekeeper. Office procures any shortfall, then the goods go
+  // into transit; the storekeeper's stock rises only after they confirm receipt.
+  const from=CENTRAL_ID(), to=SITE_ID();
   const t:Transfer={ id:nextId('TR-','transfers','id'), docType:'DC', docNo:r.id.replace('REQ-','REQ'), txnDate:nowDate(),
-    from:CENTRAL_ID(), to:SITE_ID(), remarks:'Against request '+r.id, status:'DRAFT', items:clone(items),
-    createdBy:me(), createdAt:nowStamp() };
+    from, to, remarks:'Approved from request '+r.id, status:'DRAFT', items:clone(items), createdBy:me(), createdAt:nowStamp() };
+  for(const it of items){ const avail=onHand(it.code,from); if(it.qty>avail) addMovement({code:it.code,qty:it.qty-avail,from:'PURCHASE',to:from,type:'PURCHASE',ref:'HO procure '+r.id,person:me()}); }
+  for(const it of items){ addMovement({code:it.code,qty:it.qty,from,to:'TRANSIT',type:'DISPATCH',ref:t.id,txnDate:t.txnDate,person:me()}); }
+  t.status='PENDING'; t.dispatchedBy=me(); t.dispatchedAt=nowStamp();
   state.transfers.push(t);
   r.status='APPROVED'; r.reviewedBy=me(); r.reviewedAt=nowStamp(); r.reviewNote=val('rv-note'); r.transferId=t.id;
-  save(); closeModal(); openTransfer(t.id); toast('Approved — transfer '+t.id+' created, ready to dispatch');
+  save(); closeModal(); renderSidebar(); renderView(); toast('Approved & sent — '+num(total)+' units dispatched to '+locName(to)+' ('+t.id+'). Awaiting the storekeeper’s receipt.');
 }
 
 /* ===========================================================
@@ -761,18 +770,20 @@ function transfersHTML(){
       <td class="n">${t.items.length}</td><td class="n">${num(transferDispatched(t))}</td>
       <td>${statusChip(st)}</td></tr>`; }).join('')
     :`<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:28px">No transfers yet</td></tr>`;
-  return `${pageTop('Material Transfers','Dispatch materials from the Central Store. Site stock updates only after confirmed receipt.', isStore()?`<button class="btn" onclick="openTransferForm()">${svg(IC.plus)} New Transfer</button>`:'')}
+  return `${pageTop('Material Transfers','Dispatches from the office to the storekeeper. Most are created automatically when the Purchase Manager approves a request; site stock updates only after the storekeeper confirms receipt.', canSend()?`<button class="btn" onclick="openTransferForm()">${svg(IC.plus)} New Transfer</button>`:'')}
   <div class="panel"><table><thead><tr><th>Transfer</th><th>DC / MTN</th><th>Date</th><th>Route</th><th class="n">Items</th><th class="n">Qty</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
-function openTransfer(id:string){ curTransfer=id; view='transfers'; renderSidebar(); renderView(); window.scrollTo(0,0); }
+// Material Transfers screen was removed (single-site pilot). Opening a delivery now
+// lands on the Receipt Confirmation page, where the storekeeper receives & checks it.
+function openTransfer(id:string){ openReceipt(id); }
 
 function transferDetailHTML(id:string){
   const t=state.transfers.find(x=>x.id===id); if(!t) return empty(IC.transfers,'Transfer not found');
   const st=transferStatus(t);
-  const canDispatch=st==='DRAFT'&&isStore();
-  const canCancel=st==='DRAFT'&&isStore();
-  const canReceive=(st==='PENDING'||st==='PARTIAL')&&isSite();   // edit receipt inline
-  const canResend=isStore()&&['PENDING','PARTIAL','RECEIVED','CLOSED'].includes(st);
+  const canDispatch=st==='DRAFT'&&canSend();
+  const canCancel=st==='DRAFT'&&canSend();
+  const canReceive=(st==='PENDING'||st==='PARTIAL')&&isReceiver();   // storekeeper edits receipt inline
+  const canResend=canSend()&&['PENDING','PARTIAL','RECEIVED','CLOSED'].includes(st);
   const actions=`<button class="btn ghost" onclick="go('transfers')">${svg(IC.arrow)} Back</button>
     ${canCancel?`<button class="btn ghost" onclick="cancelTransfer('${jsid(t.id)}')">Cancel Draft</button>`:''}
     ${canResend?`<button class="btn ghost" onclick="openResend('${jsid(t.id)}')">${svg(IC.transfers)} Resend / Replace</button>`:''}
@@ -797,7 +808,7 @@ function transferDetailHTML(id:string){
         <td><input class="f rc-in" data-f="short" type="number" min="0" value="0"></td>
         <td><input class="f rc-in rc-need" data-f="needmore" type="number" min="0" value="0"></td></tr>`; }).join('');
     return `${head}${meta}
-    <div class="hint">${svg(IC.alert,14)} Enter what actually arrived, directly here. <b>Accepted</b> adds to site stock. <b>Damaged</b> is logged separately. <b>Short</b> stays in transit until resolved (Accepted + Damaged + Short ≤ Outstanding). <b>Need More</b> raises a fresh request to the store.</div>
+    <div class="hint">${svg(IC.alert,14)} Enter what actually arrived, directly here. <b>Accepted</b> adds to your stock. <b>Damaged</b> is logged separately. <b>Short</b> stays in transit until resolved (Accepted + Damaged + Short ≤ Outstanding). <b>Need More</b> is noted on the receipt as a follow-up.</div>
     <div class="panel pad"><div class="panel-h"><b>Confirm Receipt — Line Items</b></div>
       <table class="mv-table rc-tbl"><thead><tr><th>Code</th><th>Material</th><th class="n">Outstanding</th><th>Accepted</th><th>Damaged</th><th>Short</th><th>Need More</th></tr></thead><tbody>${erows}</tbody></table>
       <div class="grid2" style="margin-top:14px">
@@ -941,13 +952,13 @@ function receiptsHTML(){
     return `<tr onclick="openTransfer('${jsid(t.id)}')" style="cursor:pointer">
       <td class="n b">${esc(t.id)}</td><td>${esc(t.docType)}-${esc(t.docNo)}</td><td>${esc(locName(t.from))} → ${esc(locName(t.to))}</td>
       <td class="n">${num(transferOutstanding(t))}</td><td>${statusChip(st)}</td>
-      <td class="row-act">${isSite()?`<button class="btn sm" onclick="event.stopPropagation();openReceipt('${jsid(t.id)}')">Confirm</button>`:'<span style="color:var(--muted);font-size:12px">Site action</span>'}</td></tr>`; };
-  return `${pageTop('Receipt Confirmation','Receiving site confirms what actually arrived. Site stock rises only by the accepted quantity.')}
+      <td class="row-act">${isReceiver()?`<button class="btn sm" onclick="event.stopPropagation();openReceipt('${jsid(t.id)}')">Confirm</button>`:'<span style="color:var(--muted);font-size:12px">Storekeeper action</span>'}</td></tr>`; };
+  return `${pageTop('Receipt Confirmation','The storekeeper confirms what actually arrived from the office. Site stock rises only by the accepted quantity; damage is logged separately.')}
   <div class="panel pad"><div class="panel-h"><b>Pending & Partial</b> <span class="count">${pend.length}</span></div>
-    <table class="mv-table"><thead><tr><th>Transfer</th><th>Document</th><th>Route</th><th class="n">In Transit</th><th>Status</th><th></th></tr></thead>
+    <table class="mv-table"><thead><tr><th>Delivery</th><th>Document</th><th>Route</th><th class="n">In Transit</th><th>Status</th><th></th></tr></thead>
     <tbody>${pend.length?pend.map(row).join(''):`<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">Nothing awaiting receipt</td></tr>`}</tbody></table></div>
   ${done.length?`<div class="panel pad" style="margin-top:16px"><div class="panel-h"><b>Recently Completed</b></div>
-    <table class="mv-table"><thead><tr><th>Transfer</th><th>Document</th><th>Route</th><th class="n">Qty</th><th>Status</th><th></th></tr></thead><tbody>${done.map(row).join('')}</tbody></table></div>`:''}`;
+    <table class="mv-table"><thead><tr><th>Delivery</th><th>Document</th><th>Route</th><th class="n">Qty</th><th>Status</th><th></th></tr></thead><tbody>${done.map(row).join('')}</tbody></table></div>`:''}`;
 }
 function openReceipt(id:string){ curTransfer=id; view='receipts'; renderSidebar(); renderView(); window.scrollTo(0,0); }
 
@@ -963,7 +974,7 @@ function receiptConfirmHTML(id:string){
       <td><input class="f rc-in rc-need" data-f="needmore" type="number" min="0" value="0" placeholder="0"></td></tr>`; }).join('');
   return `${pageTop('Confirm Receipt · '+esc(t.id),esc(t.docType)+'-'+esc(t.docNo)+' from '+esc(locName(t.from)),
     `<button class="btn ghost" onclick="go('receipts')">${svg(IC.arrow)} Back</button>`)}
-  <div class="hint">${svg(IC.alert,14)} Enter what actually arrived. <b>Accepted</b> adds to site stock. <b>Damaged</b> is logged separately. <b>Short</b> stays in transit until resolved (Accepted + Damaged + Short ≤ Outstanding). <b>Need More</b> raises a fresh request to the store for additional quantity.</div>
+  <div class="hint">${svg(IC.alert,14)} Enter what actually arrived. <b>Accepted</b> adds to your stock. <b>Damaged</b> is logged separately. <b>Short</b> stays in transit until resolved (Accepted + Damaged + Short ≤ Outstanding). <b>Need More</b> is noted on the receipt as a follow-up.</div>
   <div class="panel pad"><table class="mv-table rc-tbl"><thead><tr><th>Code</th><th>Material</th><th class="n">Outstanding</th><th>Accepted</th><th>Damaged</th><th>Short</th><th>Need More</th></tr></thead><tbody>${rows||'<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">Nothing outstanding</td></tr>'}</tbody></table>
     <div class="grid2" style="margin-top:14px">
       <div class="fld"><label>Receipt Date</label><input class="f" id="rc-date" type="date" value="${nowDate()}"></div>
@@ -988,21 +999,21 @@ function submitReceipt(id:string){
     items.push({code,accepted,damaged,short}); total+=accepted+damaged+short;
   }
   if(!items.length && !needMore.length) return toast('Enter a received quantity or a Need More quantity');
-  if(!items.length && needMore.length){ raiseNeedMore(t,needMore); return go('receipts'); }
+  const needTxt=needMore.map(i=>matName(i.code)+' '+num(i.qty)).join(', ');
+  const fullRemark=[val('rc-remarks'), needMore.length?('Need more: '+needTxt):''].filter(Boolean).join(' · ');
   const r:Receipt={ id:nextId('RC-','receipts','id'), transferId:t.id, receiptNo:'GRN-'+String(state.receipts.length+1).padStart(4,'0'),
-    receivedBy:val('rc-by')||me(), txnDate:val('rc-date')||nowDate(), confirmedAt:nowStamp(), remarks:val('rc-remarks'), items };
+    receivedBy:val('rc-by')||me(), txnDate:val('rc-date')||nowDate(), confirmedAt:nowStamp(), remarks:fullRemark, items };
   state.receipts.push(r);
   for(const it of items){
     if(it.accepted>0) addMovement({code:it.code,qty:it.accepted,from:'TRANSIT',to:t.to,type:'RECEIPT',ref:t.id,txnDate:r.txnDate,person:r.receivedBy});
     if(it.damaged>0)  addMovement({code:it.code,qty:it.damaged, from:'TRANSIT',to:'DAMAGED',type:'DAMAGE',ref:t.id,txnDate:r.txnDate,person:r.receivedBy});
     // short: no ledger move — stays in TRANSIT as outstanding until resolved
   }
-  if(needMore.length) raiseNeedMore(t, needMore, true);
   save();
   const st=transferStatus(t);
   if(st!=='CLOSED' && transferOutstanding(t)>0){ curTransfer=t.id; view='transfers'; renderSidebar(); renderView(); openResolvePrompt(t.id); }
   else { go('receipts'); }
-  toast('Receipt confirmed — '+num(total)+' units processed'+(needMore.length?'. Extra request raised to store':''));
+  toast(items.length?('Receipt confirmed — '+num(total)+' units processed'+(needMore.length?'. "Need more" noted for the storekeeper':'')):'“Need more” note sent to the storekeeper');
 }
 /** Raise a fresh Material Request to the store for extra quantity the site needs. */
 function raiseNeedMore(t:Transfer, needMore:RequestItem[], silent=false){
@@ -1194,7 +1205,7 @@ function reportLetterhead(title:string){
   return `<div class="letterhead">
     <div class="lh-brand">${brandLogo(46)}<div><div class="lh-name">${esc(BRAND.name)}</div><div class="lh-tag">${esc(BRAND.tagline)}</div></div></div>
     <div class="lh-contact">${esc(BRAND.addr)}<br>${esc(BRAND.email)} · ${esc(BRAND.phone)}</div>
-    <div class="lh-meta"><div class="lh-title">${esc(title)}</div><div class="lh-sub">${isStore()?'Storekeeper':'Site Manager'} view · Generated ${nowStamp()}</div></div>
+    <div class="lh-meta"><div class="lh-title">${esc(title)}</div><div class="lh-sub">${esc(session?session.title:ROLE_TITLE[role()])} view · Generated ${nowStamp()}</div></div>
   </div>`;
 }
 /** Sleek company brand strip shown at the top of every module. */
@@ -1306,7 +1317,7 @@ function reportLossBody(from:string,to:string){
 function historyHTML(){
   const q=qFilter.toLowerCase();
   const mv=state.movements.slice().reverse().filter(m=>!q||m.code.toLowerCase().includes(q)||matName(m.code).toLowerCase().includes(q)||(m.ref||'').toLowerCase().includes(q));
-  const TYPE_LABEL:Record<string,string>={OPEN:'Opening',DISPATCH:'Dispatch',RECEIPT:'Receipt',DAMAGE:'Damaged',SHORT:'Short/Loss',ADJUST:'Adjustment'};
+  const TYPE_LABEL:Record<string,string>={OPEN:'Opening',DISPATCH:'Dispatch',RECEIPT:'Receipt',DAMAGE:'Damaged',SHORT:'Short/Loss',ADJUST:'Adjustment',PURCHASE:'HO Supply'};
   const rows=mv.slice(0,300).map(m=>`<tr>
     <td>${esc(m.txnDate)}</td><td style="color:var(--muted);font-size:11px">${esc(m.date)} ${esc(m.time)}</td>
     <td>${esc(m.ref||'—')}</td><td class="n b">${esc(m.code)}</td><td>${esc(matName(m.code))}</td>
@@ -1429,7 +1440,7 @@ function loginHTML(){
       <button class="btn red login-btn" onclick="doLogin()">${svg(IC.logout)} Sign In</button>
       <div class="login-or">OR SIGN IN AS</div>
       <button class="role-card" onclick="loginAs('purchase')"><div class="rc-ic amber">${svg(IC.office)}</div><div class="rc-t"><b>Purchase Manager</b><span>Head Office · All sites</span></div>${svg(IC.cright,18)}</button>
-      <button class="role-card" onclick="loginAs('store')"><div class="rc-ic red">${svg(IC.warehouse)}</div><div class="rc-t"><b>Storekeeper</b><span>Mariappan · Central Store</span></div>${svg(IC.cright,18)}</button>
+      <button class="role-card" onclick="loginAs('store')"><div class="rc-ic red">${svg(IC.warehouse)}</div><div class="rc-t"><b>Storekeeper</b><span>R. Suresh · Central Store</span></div>${svg(IC.cright,18)}</button>
       <button class="role-card" onclick="loginAs('site')"><div class="rc-ic blue">${svg(IC.locations)}</div><div class="rc-t"><b>Site Manager</b><span>M. Mariappan · Pilot Site</span></div>${svg(IC.cright,18)}</button>
       <div class="login-foot">Demo — <b>purchase</b>/purchase123 · <b>store</b>/store123 · <b>site</b>/site123</div>
     </div></div>

@@ -15,7 +15,7 @@ type LocType = 'store' | 'site';
 type DocType = 'DC' | 'MTN';
 type TransferStatus =
   | 'DRAFT' | 'PENDING' | 'PARTIAL' | 'RECEIVED' | 'CLOSED' | 'CANCELLED';
-type MoveType = 'OPEN' | 'DISPATCH' | 'RECEIPT' | 'DAMAGE' | 'SHORT' | 'ADJUST';
+type MoveType = 'OPEN' | 'DISPATCH' | 'RECEIPT' | 'DAMAGE' | 'SHORT' | 'ADJUST' | 'PURCHASE';
 
 interface Material {
   code: string;            // unique
