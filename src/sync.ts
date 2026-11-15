@@ -19,7 +19,7 @@
    ============================================================ */
 'use strict';
 
-const SYNC_BUILD = '97';
+const SYNC_BUILD = '98';
 const SYNC_SCRIPTS = ['data', 'app'];
 /** must match the *_LS keys in the app and STORE_KEYS on the server */
 const SYNC_KEYS = ['mtts-v1'];

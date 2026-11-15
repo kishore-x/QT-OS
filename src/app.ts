@@ -241,13 +241,32 @@ function loginUser(acc:AppUser){
 function loginAs(r:Role){ const acc=(store.users||[]).find(x=>x.role===r); if(acc) loginUser(acc); }
 function logout(){ session=null; saveSession(); view='dashboard'; boot(); }
 
-/* ---------- site notes / notifications (receipt remarks surfaced to the store) ---------- */
-interface SiteNote { id:string; transferId:string; label:string; by:string; when:string; text:string; }
+/* ---------- notifications ----------
+   Two kinds, newest first:
+   • 'order' — a replacement Material Request auto-raised when the storekeeper
+     records damage / "need more" on a receipt. The Purchase Manager clicks it
+     to review the order and send the materials back.
+   • 'note'  — a free-text remark on a receipt that did NOT raise an order (FYI).
+*/
+interface SiteNote { id:string; kind:'order'|'note'; linkId:string; label:string; by:string; when:string; text:string; status?:RequestStatus; }
 function siteNotes(): SiteNote[] {
-  return state.receipts.filter(r=>r.remarks && r.remarks.trim())
-    .map(r=>{ const t=state.transfers.find(x=>x.id===r.transferId);
-      return { id:r.id, transferId:r.transferId, label:(t?`${t.id} · ${t.docType}-${t.docNo}`:r.transferId), by:r.receivedBy, when:r.confirmedAt, text:r.remarks!.trim() }; })
-    .sort((a,b)=>b.when.localeCompare(a.when));
+  const orderedReceipts = new Set(state.requests.filter(r=>r.fromReceipt).map(r=>r.fromReceipt));
+  const orders: SiteNote[] = state.requests.filter(r=>r.fromReceipt).map(r=>({
+    id:'ON-'+r.id, kind:'order', linkId:r.id,
+    label:r.id+(r.fromTransfer?(' · for '+r.fromTransfer):''), by:r.requestedBy, when:r.createdAt, status:r.status,
+    text:'Replacement order — '+r.items.map(i=>matName(i.code)+' '+num(i.qty)+' '+matUnit(i.code)).join(', '),
+  }));
+  const notes: SiteNote[] = state.receipts.filter(r=>r.remarks && r.remarks.trim() && !orderedReceipts.has(r.id)).map(r=>{
+    const t=state.transfers.find(x=>x.id===r.transferId);
+    return { id:r.id, kind:'note' as const, linkId:r.transferId, label:(t?`${t.id} · ${t.docType}-${t.docNo}`:r.transferId), by:r.receivedBy, when:r.confirmedAt, text:r.remarks!.trim() };
+  });
+  return [...orders, ...notes].sort((a,b)=>b.when.localeCompare(a.when));
+}
+/** Clicking a notification: an order opens its review (Purchase Manager) or the requests list; a note opens the delivery. */
+function clickNote(kind:string, id:string){
+  closeModal();
+  if(kind==='order'){ const r=state.requests.find(x=>x.id===id); if(r && canApprove() && r.status==='PENDING') openReviewRequest(id); else go('requests'); }
+  else openTransfer(id);
 }
 function unreadNotes(){ const read=state.settings.readNotes||[]; return siteNotes().filter(n=>!read.includes(n.id)); }
 function markNotesRead(){ state.settings.readNotes=siteNotes().map(n=>n.id); save(); }
@@ -289,7 +308,7 @@ function openRequestsForSite(){ return state.requests.filter(r=>r.requestedBy===
 function renderSidebar(){
   const nav=navItems();
   const pend=pendingForSite();
-  const unread=isStore()?unreadNotes().length:0;
+  const unread=(isStore()||isPurchase())?unreadNotes().length:0;
   const preq=isPurchase()?pendingRequests():0;
   const badge=(k:string)=>{ if(k==='receipts'&&pend) return `<span class="nav-badge">${pend}</span>`; if(k==='notes'&&unread) return `<span class="nav-badge">${unread>9?'9+':unread}</span>`; if(k==='requests'&&preq) return `<span class="nav-badge">${preq}</span>`; return ''; };
   const sections=navGroups().map(([title,items])=>`
@@ -309,7 +328,7 @@ function renderTopbar(){
     <div class="search">${svg(IC.search)}<input id="topSearch" placeholder="Search material, code or location…" value="${esc(qFilter)}" oninput="topSearch(this.value)"></div>
     <div class="tb-right">
       <button class="icn" title="Toggle light / dark" onclick="toggleTheme()">${svg(dark?ICsun:ICmoon)}</button>
-      ${isStore()?(()=>{const n=unreadNotes().length;return `<button class="icn" title="Site requests" onclick="openNotes()">${n?`<span class="icn-dot">${n>9?'9+':n}</span>`:''}${svg(IC.bell)}</button>`;})():`<button class="icn" title="Notifications">${svg(IC.bell)}</button>`}
+      ${(isStore()||isPurchase())?(()=>{const n=unreadNotes().length;return `<button class="icn" title="Notifications" onclick="openNotes()">${n?`<span class="icn-dot">${n>9?'9+':n}</span>`:''}${svg(IC.bell)}</button>`;})():`<button class="icn" title="Notifications">${svg(IC.bell)}</button>`}
       <button class="user-chip" title="Sign out" onclick="logout()"><div class="avatar">${esc(initials)}</div><div class="u"><b>${esc(u)}</b><span>${esc(r)}</span></div>${svg(IC.chev,16)}</button>
     </div>`;
 }
@@ -317,25 +336,25 @@ function switchRole(){ state.settings.role = isStore()?'site':'store'; save(); i
 function go(v:string){ if(!navItems().some(n=>n[0]===v)&&v!==v){} view=v; curTransfer=''; renderSidebar(); renderView(); window.scrollTo(0,0); }
 function openNotes(){
   const notes=siteNotes(); const read=state.settings.readNotes||[];
-  const body=notes.length?notes.map(n=>`<div class="note-item ${read.includes(n.id)?'':'unread'}" onclick="gotoNote('${jsid(n.transferId)}')">
-      <div class="note-ic">${svg(IC.bell,15)}</div>
-      <div class="note-main"><div class="note-txt">${esc(n.text)}</div>
+  const body=notes.length?notes.map(n=>`<div class="note-item ${read.includes(n.id)?'':'unread'}" onclick="clickNote('${n.kind}','${jsid(n.linkId)}')">
+      <div class="note-ic">${svg(n.kind==='order'?IC.requests:IC.bell,15)}</div>
+      <div class="note-main"><div class="note-txt">${esc(n.text)} ${n.kind==='order'&&n.status?reqChip(n.status):''}</div>
       <div class="note-meta">${esc(n.label)} · ${esc(n.by)} · ${esc(n.when)}</div></div>
       <div class="note-go">${svg(IC.arrow,15)}</div></div>`).join('')
-    :`<div class="draft-empty" style="margin:6px">No site requests yet. Remarks a site enters when confirming receipt will appear here.</div>`;
-  openModal(`<div class="modal">${mh(IC.bell,'Site Requests','Notes from the receiving site, newest first')}
+    :`<div class="draft-empty" style="margin:6px">No notifications yet. When the storekeeper records damage or asks for more while confirming a receipt, the replacement order shows up here.</div>`;
+  openModal(`<div class="modal">${mh(IC.bell,'Notifications','Replacement orders &amp; site notes — newest first')}
     <div class="m-body" style="padding-top:8px">${body}</div></div>`);
   markNotesRead(); renderTopbar(); if(view==='dashboard') document.getElementById('app')!.innerHTML=dashboardHTML();
 }
 function gotoNote(id:string){ closeModal(); openTransfer(id); }
 function notesViewHTML(){
   const notes=siteNotes(); const read=state.settings.readNotes||[]; const unread=unreadNotes().length;
-  const rows=notes.length?notes.map(n=>`<div class="note-item ${read.includes(n.id)?'':'unread'}" onclick="openTransfer('${jsid(n.transferId)}')">
-      <div class="note-ic">${svg(IC.bell,15)}</div>
-      <div class="note-main"><div class="note-txt">${esc(n.text)}</div><div class="note-meta">${esc(n.label)} · ${esc(n.by)} · ${esc(n.when)}</div></div>
+  const rows=notes.length?notes.map(n=>`<div class="note-item ${read.includes(n.id)?'':'unread'}" onclick="clickNote('${n.kind}','${jsid(n.linkId)}')">
+      <div class="note-ic">${svg(n.kind==='order'?IC.requests:IC.bell,15)}</div>
+      <div class="note-main"><div class="note-txt">${esc(n.text)} ${n.kind==='order'&&n.status?reqChip(n.status):''}</div><div class="note-meta">${esc(n.label)} · ${esc(n.by)} · ${esc(n.when)}</div></div>
       <div class="note-go">${svg(IC.arrow,15)}</div></div>`).join('')
-    :empty(IC.bell,'No site requests yet. When the receiving site adds a remark while confirming a receipt, it appears here.');
-  return `${pageTop('Notifications','Requests and notes from the receiving site — newest first'+(unread?` · ${unread} new`:''))}
+    :empty(IC.bell,'No notifications yet. When the storekeeper records damage or asks for more while confirming a receipt, the replacement order shows up here.');
+  return `${pageTop('Notifications','Replacement orders from the site & receipt notes — newest first'+(unread?` · ${unread} new`:''))}
   <div class="panel pad">${rows}</div>`;
 }
 let _ts:ReturnType<typeof setTimeout>|null=null;
@@ -454,16 +473,16 @@ function dashboardHTML(){
       ${partial?`<div class="note-row">${svg(IC.alert,15)} ${partial} transfer(s) partially received — awaiting reconciliation</div>`:''}
     </div>
   </div>
-  ${isStore()?secLabel('','Site requests')+siteRequestsPanel():''}`;
+  ${(isStore()||isPurchase())?secLabel('','Notifications')+siteRequestsPanel():''}`;
 }
 function siteRequestsPanel(){
   const notes=siteNotes().slice(0,6); const read=state.settings.readNotes||[]; const unread=unreadNotes().length;
-  const rows=notes.length?notes.map(n=>`<div class="note-item ${read.includes(n.id)?'':'unread'}" onclick="openTransfer('${jsid(n.transferId)}')">
-      <div class="note-ic">${svg(IC.bell,15)}</div>
-      <div class="note-main"><div class="note-txt">${esc(n.text)}</div><div class="note-meta">${esc(n.label)} · ${esc(n.by)} · ${esc(n.when)}</div></div>
+  const rows=notes.length?notes.map(n=>`<div class="note-item ${read.includes(n.id)?'':'unread'}" onclick="clickNote('${n.kind}','${jsid(n.linkId)}')">
+      <div class="note-ic">${svg(n.kind==='order'?IC.requests:IC.bell,15)}</div>
+      <div class="note-main"><div class="note-txt">${esc(n.text)} ${n.kind==='order'&&n.status?reqChip(n.status):''}</div><div class="note-meta">${esc(n.label)} · ${esc(n.by)} · ${esc(n.when)}</div></div>
       <div class="note-go">${svg(IC.arrow,15)}</div></div>`).join('')
-    :`<div class="draft-empty">No site requests yet. When the site adds a remark while confirming receipt, it shows up here.</div>`;
-  return `<div class="panel pad" style="margin-top:16px"><div class="panel-h"><b>Site Requests &amp; Notes</b>${unread?`<span class="count">${unread} new</span>`:''}${notes.length&&unread?`<button class="btn ghost sm" onclick="markNotesRead();renderTopbar();renderView()">Mark all read</button>`:''}</div>${rows}</div>`;
+    :`<div class="draft-empty">No notifications yet. Damage or "need more" recorded at receipt raises a replacement order here.</div>`;
+  return `<div class="panel pad" style="margin-top:16px"><div class="panel-h"><b>Notifications</b>${unread?`<span class="count">${unread} new</span>`:''}${notes.length&&unread?`<button class="btn ghost sm" onclick="markNotesRead();renderTopbar();renderView()">Mark all read</button>`:''}</div>${rows}</div>`;
 }
 
 /* ===========================================================
@@ -659,7 +678,7 @@ let reqDraftItems:RequestItem[]=[];
 function requestsHTML(){
   const list=state.requests.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
   const row=(r:MaterialRequest)=>`<tr onclick="${canApprove()&&r.status==='PENDING'?`openReviewRequest('${jsid(r.id)}')`:''}" style="${canApprove()&&r.status==='PENDING'?'cursor:pointer':''}">
-      <td class="n b">${esc(r.id)}</td><td>${esc(r.txnDate)}</td><td>${esc(r.requestedBy)}</td>
+      <td class="n b">${esc(r.id)}${r.fromReceipt?`<div style="font-size:11px;color:#c0392b;font-weight:600">↩ replacement · ${esc(r.fromTransfer||'')}</div>`:''}</td><td>${esc(r.txnDate)}</td><td>${esc(r.requestedBy)}</td>
       <td class="n">${r.items.length}</td><td class="n">${num(reqQty(r))}</td>
       <td>${reqChip(r.status)}</td><td>${r.reviewedBy?esc(r.reviewedBy)+' · '+esc(r.reviewedAt||''):'<span style="color:var(--muted);font-size:12px">—</span>'}</td>
       <td class="row-act">${canApprove()&&r.status==='PENDING'?`<button class="btn sm" onclick="event.stopPropagation();openReviewRequest('${jsid(r.id)}')">Review</button>`:''}</td></tr>`;
@@ -974,7 +993,7 @@ function receiptConfirmHTML(id:string){
       <td><input class="f rc-in rc-need" data-f="needmore" type="number" min="0" value="0" placeholder="0"></td></tr>`; }).join('');
   return `${pageTop('Confirm Receipt · '+esc(t.id),esc(t.docType)+'-'+esc(t.docNo)+' from '+esc(locName(t.from)),
     `<button class="btn ghost" onclick="go('receipts')">${svg(IC.arrow)} Back</button>`)}
-  <div class="hint">${svg(IC.alert,14)} Enter what actually arrived. <b>Accepted</b> adds to your stock. <b>Damaged</b> is logged separately. <b>Short</b> stays in transit until resolved (Accepted + Damaged + Short ≤ Outstanding). <b>Need More</b> is noted on the receipt as a follow-up.</div>
+  <div class="hint">${svg(IC.alert,14)} Enter what actually arrived. <b>Accepted</b> adds to your stock. <b>Damaged</b> is logged as loss. <b>Short</b> stays in transit until resolved (Accepted + Damaged + Short ≤ Outstanding). <b>Damaged</b> + <b>Need More</b> are automatically raised as a <b>replacement order</b> to Head Office for the Purchase Manager to send back.</div>
   <div class="panel pad"><table class="mv-table rc-tbl"><thead><tr><th>Code</th><th>Material</th><th class="n">Outstanding</th><th>Accepted</th><th>Damaged</th><th>Short</th><th>Need More</th></tr></thead><tbody>${rows||'<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">Nothing outstanding</td></tr>'}</tbody></table>
     <div class="grid2" style="margin-top:14px">
       <div class="fld"><label>Receipt Date</label><input class="f" id="rc-date" type="date" value="${nowDate()}"></div>
@@ -999,29 +1018,36 @@ function submitReceipt(id:string){
     items.push({code,accepted,damaged,short}); total+=accepted+damaged+short;
   }
   if(!items.length && !needMore.length) return toast('Enter a received quantity or a Need More quantity');
-  const needTxt=needMore.map(i=>matName(i.code)+' '+num(i.qty)).join(', ');
-  const fullRemark=[val('rc-remarks'), needMore.length?('Need more: '+needTxt):''].filter(Boolean).join(' · ');
+  // Replacement order = damaged units + any "Need More" quantity, per material.
+  const reorderMap:Record<string,number>={};
+  for(const it of items){ if(it.damaged>0) reorderMap[it.code]=(reorderMap[it.code]||0)+it.damaged; }
+  for(const nm of needMore){ reorderMap[nm.code]=(reorderMap[nm.code]||0)+nm.qty; }
+  const reorder:RequestItem[]=Object.keys(reorderMap).map(code=>({code,qty:reorderMap[code]}));
   const r:Receipt={ id:nextId('RC-','receipts','id'), transferId:t.id, receiptNo:'GRN-'+String(state.receipts.length+1).padStart(4,'0'),
-    receivedBy:val('rc-by')||me(), txnDate:val('rc-date')||nowDate(), confirmedAt:nowStamp(), remarks:fullRemark, items };
+    receivedBy:val('rc-by')||me(), txnDate:val('rc-date')||nowDate(), confirmedAt:nowStamp(), remarks:val('rc-remarks'), items };
   state.receipts.push(r);
   for(const it of items){
     if(it.accepted>0) addMovement({code:it.code,qty:it.accepted,from:'TRANSIT',to:t.to,type:'RECEIPT',ref:t.id,txnDate:r.txnDate,person:r.receivedBy});
     if(it.damaged>0)  addMovement({code:it.code,qty:it.damaged, from:'TRANSIT',to:'DAMAGED',type:'DAMAGE',ref:t.id,txnDate:r.txnDate,person:r.receivedBy});
     // short: no ledger move — stays in TRANSIT as outstanding until resolved
   }
+  // Damage / short / "need more" automatically becomes a replacement ORDER back to Head Office.
+  const order = reorder.length ? raiseReplacementOrder(t, r, reorder, val('rc-remarks')) : null;
   save();
   const st=transferStatus(t);
-  if(st!=='CLOSED' && transferOutstanding(t)>0){ curTransfer=t.id; view='transfers'; renderSidebar(); renderView(); openResolvePrompt(t.id); }
+  if(st!=='CLOSED' && transferOutstanding(t)>0){ curTransfer=t.id; view='receipts'; renderSidebar(); renderView(); openResolvePrompt(t.id); }
   else { go('receipts'); }
-  toast(items.length?('Receipt confirmed — '+num(total)+' units processed'+(needMore.length?'. "Need more" noted for the storekeeper':'')):'“Need more” note sent to the storekeeper');
+  toast(order?('Receipt confirmed — replacement order '+order.id+' sent to Head Office for approval'):('Receipt confirmed — '+num(total)+' units processed'));
 }
-/** Raise a fresh Material Request to the store for extra quantity the site needs. */
-function raiseNeedMore(t:Transfer, needMore:RequestItem[], silent=false){
-  const r:MaterialRequest={ id:nextId('REQ-','requests','id'), requestedBy:me(), txnDate:nowDate(),
-    remarks:'Additional requirement raised at receipt of '+t.id+(val('rc-remarks')?(' — '+val('rc-remarks')):''),
-    status:'PENDING', items:clone(needMore), createdAt:nowStamp() };
+/** Auto-raise a replacement Material Request to Head Office for the damaged / short / "need more"
+    quantity on a receipt. It lands in the Purchase Manager's Approval Inbox + Notifications;
+    approving it sends the materials back to the storekeeper (approve & send, one step). */
+function raiseReplacementOrder(t:Transfer, rc:Receipt, items:RequestItem[], note:string): MaterialRequest {
+  const r:MaterialRequest={ id:nextId('REQ-','requests','id'), requestedBy:rc.receivedBy||me(), txnDate:nowDate(),
+    remarks:'Replacement for damage / shortfall on '+t.id+(note?(' — '+note):''),
+    status:'PENDING', items:clone(items), createdAt:nowStamp(), fromReceipt:rc.id, fromTransfer:t.id };
   state.requests.push(r);
-  if(!silent){ save(); toast('Request '+r.id+' raised to the store for '+needMore.length+' item(s)'); }
+  return r;
 }
 /* ---- discrepancy resolution for leftover in-transit ---- */
 function openResolvePrompt(id:string){

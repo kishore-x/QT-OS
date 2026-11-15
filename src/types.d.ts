@@ -113,6 +113,8 @@ interface MaterialRequest {
   reviewedAt?: string;
   reviewNote?: string;
   transferId?: string;     // transfer auto-created on approval
+  fromReceipt?: string;    // set when auto-raised from a receipt's damage / "need more" (a replacement order)
+  fromTransfer?: string;   // the original delivery the replacement is for
 }
 
 interface Settings {

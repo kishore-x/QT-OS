@@ -4,3 +4,5 @@ node_modules/
 js/
 # SQLite database (contains company data)
 data/
+.vercel
+.env*
