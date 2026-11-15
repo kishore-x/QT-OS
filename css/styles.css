@@ -1761,3 +1761,66 @@ body.logged-out .content{padding:0!important}
 .ck{display:flex;align-items:center;gap:8px;font-size:13px;color:#334155;padding:8px 10px;border:1px solid var(--line);border-radius:8px;cursor:pointer}
 .ck input{width:16px;height:16px;accent-color:#244BDB}
 .login-card2 .rc-ic.amber{background:#FFF0C2;color:#C77B0A}
+
+/* ============================================================
+   DARK MODE — re-asserts the dark palette over the later
+   hardcoded-light reskin blocks (LIMS / dashboard v3/v4).
+   Kept last so it wins the cascade. Toggle: .icn moon/sun.
+   ============================================================ */
+[data-theme="dark"]{
+  --lims-blue:#4f8cff; --lims-ink:#f3f6fb; --lims-line:rgba(255,255,255,.09);
+}
+/* page + core chrome */
+[data-theme="dark"] body,[data-theme="dark"] .content{background:var(--bg)}
+[data-theme="dark"] .sidebar{background:var(--surface);border-right-color:var(--line);color:var(--text)}
+[data-theme="dark"] .sidebar .logo{border-bottom-color:var(--line)}
+[data-theme="dark"] .topbar{background:var(--surface);border-bottom-color:var(--line)}
+[data-theme="dark"] .search{background:#0c1424;border-color:var(--line)}
+[data-theme="dark"] .icn{background:var(--surface);border-color:var(--line);color:var(--text)}
+[data-theme="dark"] .icn:hover{background:rgba(255,255,255,.05)}
+[data-theme="dark"] .user-chip{background:var(--surface);border-color:var(--line)}
+[data-theme="dark"] .user-chip:hover{background:rgba(255,255,255,.05)}
+[data-theme="dark"] .user-chip .u b{color:var(--ink)}
+[data-theme="dark"] .side-foot{border-top-color:var(--line);color:var(--dim)}
+/* nav */
+[data-theme="dark"] .nav-item{color:var(--text)}
+[data-theme="dark"] .nav-item svg{color:var(--muted)}
+[data-theme="dark"] .nav-item:hover{background:rgba(255,255,255,.05);color:var(--ink)}
+[data-theme="dark"] .nav-item.active{background:rgba(214,40,40,.18)!important;color:#f9a8a8!important}
+[data-theme="dark"] .nav-item.active svg{color:#f9a8a8!important}
+/* hero + headings text */
+[data-theme="dark"] .hero-h,[data-theme="dark"] .hd-n,[data-theme="dark"] .lkpi-n,
+[data-theme="dark"] .dash-head>b,[data-theme="dark"] .panel-h b,[data-theme="dark"] .page-top h1,
+[data-theme="dark"] .lh-title,[data-theme="dark"] .site-switch .ss-t b,
+[data-theme="dark"] .empty-state b{color:var(--ink)}
+[data-theme="dark"] .hero-sub,[data-theme="dark"] .lkpi-l,[data-theme="dark"] .hd-m,
+[data-theme="dark"] .rt-link,[data-theme="dark"] .pt,[data-theme="dark"] .route-pills .pt-pill,
+[data-theme="dark"] .ws-pick,[data-theme="dark"] .ck,[data-theme="dark"] .lkpi-ic{color:var(--text)!important}
+/* cards / panels / surfaces that were hardcoded #fff */
+[data-theme="dark"] .panel,[data-theme="dark"] .lkpi,[data-theme="dark"] .pt,
+[data-theme="dark"] .route-pills .pt-pill,[data-theme="dark"] .route-pills .pt-pill.soft,
+[data-theme="dark"] .site-switch,[data-theme="dark"] .ws-del,[data-theme="dark"] .bb-bar,
+[data-theme="dark"] .letterhead{background:var(--surface);border-color:var(--line)}
+[data-theme="dark"] .lkpi{border-color:var(--line)!important}
+[data-theme="dark"] .lkpi[onclick]:hover{border-color:var(--blue)!important;box-shadow:0 2px 0 var(--blue)}
+[data-theme="dark"] .pt.on,[data-theme="dark"] .btn.dark{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+[data-theme="dark"] .lkpi-ic{color:var(--text)!important}
+[data-theme="dark"] .lkpi[onclick]:hover .lkpi-ic{color:var(--blue)!important}
+/* site switcher + menu rows */
+[data-theme="dark"] .site-switch:hover{background:rgba(255,255,255,.05);border-color:var(--blue)}
+[data-theme="dark"] .ws-row.on,[data-theme="dark"] .ws-row.on .ws-pick,
+[data-theme="dark"] .menu-row.on{background:rgba(214,40,40,.18)}
+[data-theme="dark"] .ws-pick:hover{background:rgba(255,255,255,.05)}
+[data-theme="dark"] .ws-del{color:var(--muted)}
+/* buttons */
+[data-theme="dark"] .btn.ghost{background:var(--surface);color:var(--text);border-color:var(--line)}
+[data-theme="dark"] .btn.ghost:hover{background:rgba(255,255,255,.05);border-color:var(--line)}
+/* login screen */
+[data-theme="dark"] .login-panel{background:var(--bg)}
+[data-theme="dark"] .login-card2 .login-sub,[data-theme="dark"] .login-foot{color:var(--muted)}
+[data-theme="dark"] .login-card2 .fld label{color:var(--text)}
+[data-theme="dark"] .login-card2 .role-card{background:var(--surface);border-color:var(--line)}
+[data-theme="dark"] .login-card2 .role-card:hover{background:rgba(255,255,255,.05);border-color:var(--blue)}
+[data-theme="dark"] .login-card2 .rc-t b{color:var(--ink)}
+[data-theme="dark"] .login-foot{border-top-color:var(--line)}
+[data-theme="dark"] .inp .f{background:var(--surface);border-color:var(--line);color:var(--text)}
