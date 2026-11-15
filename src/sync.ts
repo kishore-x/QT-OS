@@ -19,7 +19,7 @@
    ============================================================ */
 'use strict';
 
-const SYNC_BUILD = '98';
+const SYNC_BUILD = '99';
 const SYNC_SCRIPTS = ['data', 'app'];
 /** must match the *_LS keys in the app and STORE_KEYS on the server */
 const SYNC_KEYS = ['mtts-v1'];
@@ -147,10 +147,46 @@ function syncUploadMissing() {
   Object.keys(syncPending).forEach(syncFlush);
 }
 
+/* ---------- live updates ----------
+   Poll the server so a change made by another user (e.g. a storekeeper raising
+   a request) appears on this screen within a few seconds, without a manual
+   refresh. When the server's version is newer than ours and we have nothing
+   unsent, copy it into localStorage and ask the app to re-render (liveRefresh).
+   Skipped while we have local writes queued, and while the tab is hidden. */
+let syncPollTimer: ReturnType<typeof setInterval> | null = null;
+
+async function syncPollOnce() {
+  if (syncMode !== 'server') return;
+  if (document.hidden) return;
+  if (Object.keys(syncPending).length || Object.values(syncInFlight).some(Boolean)) return; // don't clobber unsent local edits
+  try {
+    const res = await fetch('api/stores', { cache: 'no-store' });
+    if (!res.ok || !(res.headers.get('content-type') || '').includes('json')) return;
+    const stores: Record<string, { version: number; data: unknown }> = await res.json();
+    let changed = false;
+    for (const key of SYNC_KEYS) {
+      const s = stores[key];
+      if (s && s.version > (syncVersions[key] || 0)) {
+        syncVersions[key] = s.version;
+        try { localStorage.setItem(key, JSON.stringify(s.data)); } catch {}
+        changed = true;
+      }
+    }
+    if (changed && typeof liveRefresh === 'function') liveRefresh();
+  } catch { /* offline / transient — try again next tick */ }
+}
+
+function syncStartLive() {
+  if (syncMode !== 'server' || syncPollTimer) return;
+  syncPollTimer = setInterval(syncPollOnce, 6000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) syncPollOnce(); });
+  window.addEventListener('focus', () => syncPollOnce());
+}
+
 syncPull().then(ok => {
   syncMode = ok ? 'server' : 'local';
   syncLoadScripts(() => {
-    const start = () => { boot(); syncSetStatus('saved'); if (syncMode === 'server') syncUploadMissing(); };
+    const start = () => { boot(); syncSetStatus('saved'); if (syncMode === 'server') { syncUploadMissing(); syncStartLive(); } };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
   });
 });

@@ -93,6 +93,26 @@ const curWs=()=>store.workspaces.find(w=>w.id===store.currentWs)||store.workspac
 const wsName=()=>curWs()?curWs().name:'Site';
 let state: MTState = curWs().data;
 function save(){ try{ localStorage.setItem(LS, JSON.stringify(store)); }catch{} if(typeof syncPush==='function') syncPush(LS, store); }
+
+/* Live refresh: sync.ts calls this when another user's change arrives from the
+   server (it has already written the new data to localStorage). Re-read the
+   store, update the bell + badges immediately, and refresh the current screen —
+   unless a modal/form is open, in which case defer the content refresh until it
+   closes so the user's input is never clobbered. */
+let _liveDeferred=false;
+function liveRefresh(){
+  try{
+    const prevWs=store.currentWs;
+    store=loadStore();
+    if(store.workspaces.find(w=>w.id===prevWs)) store.currentWs=prevWs; // keep the site I'm viewing
+    state=curWs().data;
+    const ids=allowedWsIds(); if(!ids.includes(store.currentWs) && ids.length){ store.currentWs=ids[0]; state=curWs().data; }
+    renderSidebar(); renderTopbar();
+    const layer=document.getElementById('layer');
+    const modalOpen=!!(layer && layer.innerHTML.trim().length>0);
+    if(modalOpen) _liveDeferred=true; else renderView();
+  }catch(err){ console.error('liveRefresh failed:',err); }
+}
 function resetData(){ const w=curWs(); w.data=clone(SEED); state=w.data; save(); go('dashboard'); toast('Demo data reset'); }
 function switchWs(id:string){ const w=store.workspaces.find(x=>x.id===id); if(!w) return; if(!allowedWsIds().includes(id)) return toast('You do not have access to that site'); store.currentWs=id; state=w.data; save(); view='dashboard'; curTransfer=''; closeModal(); renderSidebar(); renderTopbar(); renderView(); toast('Switched to '+w.name); }
 function addSite(siteName:string, centralName:string){
@@ -269,7 +289,7 @@ function clickNote(kind:string, id:string){
   else openTransfer(id);
 }
 function unreadNotes(){ const read=state.settings.readNotes||[]; return siteNotes().filter(n=>!read.includes(n.id)); }
-function markNotesRead(){ state.settings.readNotes=siteNotes().map(n=>n.id); save(); }
+function markNotesRead(){ const ids=siteNotes().map(n=>n.id); const cur=state.settings.readNotes||[]; if(ids.length===cur.length && ids.every(i=>cur.includes(i))) return; state.settings.readNotes=ids; save(); }
 
 /* ---------- theme ---------- */
 const THEME_LS='mtts-theme';
@@ -394,7 +414,7 @@ function renderErrorHTML(where:string, err:any){
 
 /* ---------- modal helpers ---------- */
 function openModal(html:string){ const l=document.getElementById('layer')!; l.innerHTML=`<div class="scrim" onclick="closeModal()"></div>${html}`; l.classList.add('on'); }
-function closeModal(){ const l=document.getElementById('layer')!; l.classList.remove('on'); l.innerHTML=''; }
+function closeModal(){ const l=document.getElementById('layer')!; l.classList.remove('on'); l.innerHTML=''; if(_liveDeferred){ _liveDeferred=false; renderView(); } }
 function val(id:string){ const e=document.getElementById(id) as HTMLInputElement; return e?e.value.trim():''; }
 function numVal(id:string){ return Number(val(id))||0; }
 function mh(icon:string,title:string,sub:string){ return `<div class="m-head"><div class="mh-ic" style="background:var(--blue-l);color:var(--blue)">${svg(icon)}</div><div><h3>${title}</h3><p>${sub}</p></div><button class="x" onclick="closeModal()">×</button></div>`; }
